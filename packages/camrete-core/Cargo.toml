@@ -1,0 +1,36 @@
+[package]
+name = "camrete-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+astral-tokio-tar = "0.5.6"
+async-compression = { version = "0.4.33", features = ["tokio", "gzip"] }
+bytes = "1.11.0"
+diesel = { version = "2.3.3", features = [
+    "sqlite",
+    "returning_clauses_for_sqlite_3_35",
+] }
+directories = "6.0.0"
+futures-core = "0.3.31"
+futures-util = { version = "0.3.31", features = ["io"] }
+miette = "7.6.0"
+percent-encoding = "2.3.2"
+pin-project = "1.1.10"
+reqwest = { version = "0.12.24", features = ["stream"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+# simd-json = "0.17.0"
+thiserror = "2.0.17"
+time = { version = "0.3.44", features = ["parsing", "serde"] }
+tokio = "1.48.0"
+tokio-util = { version = "0.7.17", features = ["compat"] }
+tracing = "0.1.41"
+# uniffi = { version = "0.30.0", features = ["cli"] }
+url = { version = "2.5.7", features = ["serde"] }
+
+[build-dependencies]
+# uniffi = { version = "0.30.0", features = ["build"] }
+
+[dev-dependencies]
+serde_test = "1.0.177"
