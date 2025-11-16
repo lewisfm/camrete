@@ -99,7 +99,7 @@ CREATE INDEX idx_module_localizations_release_id ON module_localizations(release
 CREATE TABLE module_relationship_groups (
     group_id INTEGER PRIMARY KEY, -- Only one dependency per group needs to be satisfied
     release_id INTEGER NOT NULL REFERENCES module_releases(release_id) ON DELETE CASCADE,
-    ordinal INTEGER NOT NULL   -- group index in original metadata
+    ordinal INTEGER NOT NULL,   -- group index in original metadata
 
     rel_type INTEGER NOT NULL, -- depends, recommends, suggests, conflicts, provides
     choice_help_text TEXT,
