@@ -27,7 +27,7 @@ pub type DatabaseConnection = SqliteConnection;
 pub static DIRS: LazyLock<ProjectDirs> =
     LazyLock::new(|| ProjectDirs::from("", "", "CKAN").expect("user home dir available"));
 
-static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
+static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"), " <https://github.com/lewisfm/camrete>");
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum Error {
