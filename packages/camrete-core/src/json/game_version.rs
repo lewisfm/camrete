@@ -1,79 +1,48 @@
+use derive_more::{Deref, From, Into};
 use serde::{
     Deserialize, Serialize,
     de::{self, Unexpected, Visitor},
 };
-use std::fmt::{self, Formatter, Write};
+use std::{
+    fmt::{self, Formatter, Write},
+    str::FromStr,
+};
 
-#[derive(Debug, PartialEq, Eq, Default)]
-pub enum GameVersionSpec {
-    #[default]
-    Any,
-    Named {
-        major: u16,
-        minor: Option<u16>,
-        patch: Option<u16>,
-    },
-}
+use crate::repo::game::GameVersion;
 
-impl GameVersionSpec {
-    pub fn is_any(&self) -> bool {
-        matches!(self, Self::Any)
-    }
+#[derive(Debug, Copy, Clone, Deref, From, Into, PartialEq, Eq, Default)]
+pub struct MetaGameVersion(pub GameVersion);
 
-    pub fn major(&self) -> Option<u16> {
-        if let &Self::Named { major, .. } = self {
-            Some(major)
-        } else {
-            None
-        }
-    }
-
-    pub fn minor(&self) -> Option<u16> {
-        if let &Self::Named { minor, .. } = self {
-            minor
-        } else {
-            None
-        }
-    }
-
-    pub fn patch(&self) -> Option<u16> {
-        if let &Self::Named { patch, .. } = self {
-            patch
-        } else {
-            None
-        }
-    }
-}
-
-impl Serialize for GameVersionSpec {
+impl Serialize for MetaGameVersion {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match self {
-            GameVersionSpec::Any => serializer.serialize_none(),
-            &GameVersionSpec::Named {
-                major,
-                minor,
-                patch,
-            } => {
-                let mut string = major.to_string();
+        let Some(major) = self.0.major() else {
+            return serializer.serialize_none();
+        };
+        let mut string = major.to_string();
 
-                if let Some(minor) = minor {
-                    write!(string, ".{minor}").unwrap();
+        let Some(minor) = self.0.minor() else {
+            return serializer.serialize_str(&string);
+        };
+        write!(string, ".{minor}").unwrap();
 
-                    if let Some(patch) = patch {
-                        write!(string, ".{patch}").unwrap();
-                    }
-                }
+        let Some(patch) = self.0.patch() else {
+            return serializer.serialize_str(&string);
+        };
+        write!(string, ".{patch}").unwrap();
 
-                serializer.serialize_str(&string)
-            }
-        }
+        let Some(build) = self.0.build() else {
+            return serializer.serialize_str(&string);
+        };
+        write!(string, ".{build}").unwrap();
+
+        serializer.serialize_str(&string)
     }
 }
 
-impl<'a> Deserialize<'a> for GameVersionSpec {
+impl<'a> Deserialize<'a> for MetaGameVersion {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'a>,
@@ -81,40 +50,27 @@ impl<'a> Deserialize<'a> for GameVersionSpec {
         struct Visit;
 
         impl Visitor<'_> for Visit {
-            type Value = GameVersionSpec;
+            type Value = MetaGameVersion;
 
             fn expecting(&self, f: &mut Formatter) -> fmt::Result {
                 write!(f, "string \"any\" or null or \"N[.N[.N]]\"")
             }
 
             fn visit_none<E>(self) -> Result<Self::Value, E>
-                where
-                    E: de::Error, {
-                Ok(GameVersionSpec::Any)
+            where
+                E: de::Error,
+            {
+                Ok(MetaGameVersion::default())
             }
 
             fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                if v == "any" {
-                    return Ok(GameVersionSpec::Any);
-                }
+                let parsed = GameVersion::from_str(v)
+                    .map_err(|_| de::Error::invalid_value(Unexpected::Str(v), &Visit))?;
 
-                let mut parts = v.split('.').map(|part| {
-                    part.parse()
-                        .map_err(|_| de::Error::invalid_value(Unexpected::Str(v), &Visit))
-                });
-
-                let major = parts.next().unwrap()?;
-                let minor = parts.next().transpose()?;
-                let patch = parts.next().transpose()?;
-
-                Ok(GameVersionSpec::Named {
-                    major,
-                    minor,
-                    patch,
-                })
+                Ok(parsed.into())
             }
         }
 
@@ -124,53 +80,43 @@ impl<'a> Deserialize<'a> for GameVersionSpec {
 
 #[cfg(test)]
 mod test {
-    use serde_test::{assert_de_tokens, assert_tokens, Token};
+    use serde_test::{Token, assert_de_tokens, assert_tokens};
 
-    use super::GameVersionSpec;
+    use crate::repo::game::GameVersion;
+
+    use super::MetaGameVersion;
 
     #[test]
     fn de_any() {
-        let val = GameVersionSpec::Any;
+        let val = MetaGameVersion::default();
 
         assert_de_tokens(&val, &[Token::Str("any")]);
     }
 
     #[test]
     fn ser_de_major_only() {
-        let val = GameVersionSpec::Named {
-            major: 1,
-            minor: None,
-            patch: None,
-        };
+        let val = MetaGameVersion(GameVersion::new(Some(1), None, None, None));
 
         assert_tokens(&val, &[Token::Str("1")]);
     }
 
     #[test]
     fn ser_de_major_minor() {
-        let val = GameVersionSpec::Named {
-            major: 1,
-            minor: Some(2),
-            patch: None,
-        };
+        let val = MetaGameVersion(GameVersion::new(Some(1), Some(2), None, None));
 
         assert_tokens(&val, &[Token::Str("1.2")]);
     }
 
     #[test]
     fn ser_de_major_minor_patch() {
-        let val = GameVersionSpec::Named {
-            major: 1,
-            minor: Some(2),
-            patch: Some(3),
-        };
+        let val = MetaGameVersion(GameVersion::new(Some(1), Some(2), Some(3), None));
 
         assert_tokens(&val, &[Token::Str("1.2.3")]);
     }
 
     #[test]
     fn ser_de_none() {
-        let val = GameVersionSpec::Any;
+        let val = MetaGameVersion::default();
 
         assert_tokens(&val, &[Token::None]);
     }

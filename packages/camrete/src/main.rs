@@ -33,12 +33,12 @@ async fn main() -> miette::Result<()> {
 
     let args = Args::parse();
 
-    let mut repo_client = RepoClient::new("sqlite:development.db").await?;
+    let mut repo_client = RepoClient::new("../../development.db")?;
 
     let bar = Arc::new(ProgressBar::no_length().with_style(PROGRESS_STYLE_MSG.clone()));
 
     repo_client
-        .download(args.url, {
+        .download("KSP-default", args.url, {
             let bar = bar.clone();
             move |p| {
                 if let Some(bytes_expected) = p.bytes_expected {

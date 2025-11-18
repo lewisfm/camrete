@@ -1,22 +1,39 @@
-use std::{cmp::Ordering, fmt::Debug, num::ParseIntError, str::FromStr, sync::Arc};
+use std::{cmp::Ordering, fmt::Debug, num::ParseIntError, str::FromStr};
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub struct GameVersion {
-    major: Option<u32>,
-    minor: Option<u32>,
-    patch: Option<u32>,
-    build: Option<u32>,
-}
+#[derive(Copy, Clone, Serialize, Deserialize)]
+pub struct GameVersion(Option<u32>, Option<u32>, Option<u32>, Option<u32>);
 
 impl GameVersion {
     pub const fn empty() -> Self {
-        Self {
-            major: None,
-            minor: None,
-            patch: None,
-            build: None,
-        }
+        Self(None, None, None, None)
+    }
+
+    pub fn new(
+        major: Option<u32>,
+        minor: Option<u32>,
+        patch: Option<u32>,
+        build: Option<u32>,
+    ) -> Self {
+        Self(major, minor, patch, build)
+    }
+
+    pub fn major(&self) -> Option<u32> {
+        self.0
+    }
+
+    pub fn minor(&self) -> Option<u32> {
+        self.1
+    }
+
+    pub fn patch(&self) -> Option<u32> {
+        self.2
+    }
+
+    pub fn build(&self) -> Option<u32> {
+        self.3
     }
 
     pub fn is_empty(&self) -> bool {
@@ -26,10 +43,10 @@ impl GameVersion {
 
 impl PartialEq for GameVersion {
     fn eq(&self, other: &Self) -> bool {
-        self.major == other.major
-            && self.minor == other.minor
-            && self.patch == other.patch
-            && self.build == other.build
+        self.0 == other.0
+            && self.1 == other.1
+            && self.2 == other.2
+            && self.3 == other.3
     }
 }
 
@@ -37,22 +54,22 @@ impl Eq for GameVersion {}
 
 impl Ord for GameVersion {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let major_eq = self.major.cmp(&other.major);
+        let major_eq = self.0.cmp(&other.0);
         if major_eq != Ordering::Equal {
             return major_eq;
         }
 
-        let minor_eq = self.minor.cmp(&other.minor);
+        let minor_eq = self.1.cmp(&other.1);
         if minor_eq != Ordering::Equal {
             return minor_eq;
         }
 
-        let patch_eq = self.patch.cmp(&other.patch);
+        let patch_eq = self.2.cmp(&other.2);
         if patch_eq != Ordering::Equal {
             return patch_eq;
         }
 
-        let patch_eq = self.patch.cmp(&other.patch);
+        let patch_eq = self.2.cmp(&other.2);
         if patch_eq != Ordering::Equal {
             return patch_eq;
         }
@@ -94,10 +111,10 @@ impl FromStr for GameVersion {
         let mut parts = s.split('.');
         let mut get_next = || parts.next().map(|i| i.trim().parse::<u32>()).transpose();
 
-        version.major = get_next()?;
-        version.minor = get_next()?;
-        version.patch = get_next()?;
-        version.build = get_next()?;
+        version.0 = get_next()?;
+        version.1 = get_next()?;
+        version.2 = get_next()?;
+        version.3 = get_next()?;
 
         if parts.next().is_some() {
             return Err(GameVersionParseError::TooManyParts);
@@ -109,7 +126,7 @@ impl FromStr for GameVersion {
 
 impl Debug for GameVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let string = [self.major, self.minor, self.patch, self.build]
+        let string = [self.0, self.1, self.2, self.3]
             .map(|part| {
                 part.map(|i| i.to_string())
                     .unwrap_or_else(|| "x".to_string())

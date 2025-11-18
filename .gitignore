@@ -1,4 +1,7 @@
 *.db
+*.db-shm
+*.db-wal
+*.bin
 .env
 *.png
 *.local

@@ -7,10 +7,8 @@ edition = "2024"
 astral-tokio-tar = "0.5.6"
 async-compression = { version = "0.4.33", features = ["tokio", "gzip"] }
 bytes = "1.11.0"
-diesel = { version = "2.3.3", features = [
-    "sqlite",
-    "returning_clauses_for_sqlite_3_35",
-] }
+derive_more = { version = "2.0.1", features = ["deref", "from", "into", "try_from"] }
+diesel = { version = "2.3.3", features = ["sqlite", "returning_clauses_for_sqlite_3_35", "r2d2", "serde_json", "time"] }
 directories = "6.0.0"
 futures-core = "0.3.31"
 futures-util = { version = "0.3.31", features = ["io"] }
@@ -20,6 +18,7 @@ pin-project = "1.1.10"
 reqwest = { version = "0.12.24", features = ["stream"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+strum = { version = "0.27.2", features = ["derive"] }
 # simd-json = "0.17.0"
 thiserror = "2.0.17"
 time = { version = "0.3.44", features = ["parsing", "serde"] }

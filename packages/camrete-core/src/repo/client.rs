@@ -1,32 +1,35 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
-    io::ErrorKind,
     path::{Path, PathBuf},
     pin::Pin,
-    str::FromStr,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc,
     },
     task::{Context, Poll},
 };
 
 use async_compression::tokio::bufread::GzipDecoder;
 use bytes::Bytes;
-use diesel::prelude::*;
-use futures_core::{Stream, future};
+use derive_more::From;
+use diesel::{
+    connection::SimpleConnection,
+    insert_into,
+    prelude::*,
+    r2d2::{ConnectionManager, Pool},
+};
+use futures_core::Stream;
 use futures_util::{StreamExt, TryStreamExt};
 use miette::Diagnostic;
 use reqwest::{
     Response,
-    header::{ACCEPT, CONTENT_TYPE, HeaderValue},
+    header::{ACCEPT, CONTENT_TYPE},
 };
+use strum::EnumDiscriminants;
 use tokio::{
     io::{self, AsyncBufRead, AsyncReadExt},
     spawn,
-    task::{JoinSet, spawn_blocking},
 };
 use tokio_tar::Archive;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
@@ -34,13 +37,12 @@ use tracing::{debug, info, instrument, trace};
 use url::Url;
 
 use crate::{
-    DIRS, DatabaseConnection, Error, Result, USER_AGENT,
+    DIRS, DbPool, Error, Result, USER_AGENT,
     io::AsyncReadExt as _,
-    json::{JsonBuilds, JsonModule},
-    repo::{
-        RepoDescription, Repository,
-        game::{GameVersion, GameVersionParseError},
-    },
+    json::{JsonBuilds, JsonError, JsonModule, RepositoryRefList},
+    models::{Build, NewModule, NewModuleRelease, ReleaseMetadata, RepositoryRef},
+    repo::game::GameVersionParseError,
+    schema::repositories,
 };
 
 mod mime {
@@ -63,55 +65,69 @@ pub enum RepoUnpackError {
     #[error(
         "a JSON document in the repository was invalid\n\tdocument path: {path}\n\t(from {url})"
     )]
-    #[diagnostic(code(camrete::repo::invalid_json))]
     InvalidJsonFile {
-        source: simd_json::Error,
+        #[diagnostic(transparent)]
+        source: JsonError,
         url: Box<Url>,
         path: PathBuf,
     },
 }
 
+const MAX_DB_CONNS: u32 = 16;
+
+#[derive(Debug, Clone)]
 pub struct RepoClient {
-    database: DatabaseConnection,
+    database: DbPool,
     http: reqwest::Client,
 }
 
 impl RepoClient {
-    pub async fn new(url: &str) -> Result<Self> {
-        Ok(Self::from_db_client(DatabaseConnection::establish(url)?))
-    }
-
     pub async fn from_data_dir() -> Result<Self> {
         let repos_file = DIRS.data_local_dir().join("repos.sqlite");
         let url = Url::from_file_path(repos_file).expect("path is valid");
-        // url.set_query(Some("mode=rwc")); // create database if not exists
 
-        let database = DatabaseConnection::establish(url.as_str())?;
-
-        Ok(Self::from_db_client(database))
+        Self::new(url.as_str())
     }
 
-    fn from_db_client(database: DatabaseConnection) -> Self {
-        Self {
-            database,
+    pub fn new(url: &str) -> Result<Self> {
+        let manager = ConnectionManager::<SqliteConnection>::new(url);
+        let pool = Pool::builder().max_size(MAX_DB_CONNS).build(manager)?;
+
+        let mut conn = pool.get()?;
+        // see https://fractaledmind.github.io/2023/09/07/enhancing-rails-sqlite-fine-tuning/
+        // sleep if the database is busy, this corresponds to up to 2 seconds sleeping time.
+        conn.batch_execute("PRAGMA busy_timeout = 2000;")?;
+        // better write-concurrency
+        conn.batch_execute("PRAGMA journal_mode = WAL;")?;
+        // fsync only in critical moments
+        conn.batch_execute("PRAGMA synchronous = NORMAL;")?;
+        // write WAL changes back every 1000 pages, for an in average 1MB WAL file.
+        // May affect readers if number is increased
+        conn.batch_execute("PRAGMA wal_autocheckpoint = 1000;")?;
+        // free some space by truncating possibly massive WAL files from the last run
+        conn.batch_execute("PRAGMA wal_checkpoint(TRUNCATE);")?;
+
+        Ok(Self {
+            database: pool,
             http: reqwest::Client::builder()
                 .user_agent(USER_AGENT)
                 .build()
                 .expect("http client initialized"),
-        }
+        })
     }
 
     #[instrument(skip(self, progress_reporter))]
     pub async fn download(
         &mut self,
-        repo_url: Url,
+        name: &str,
+        url: Url,
         progress_reporter: impl Fn(UnpackProgress) + Send + Sync + 'static,
     ) -> Result<(), Error> {
         info!("Downloading an online CKAN repository");
 
         let response = self
             .http
-            .get(repo_url.clone())
+            .get(url.clone())
             .header(
                 ACCEPT,
                 "application/gzip,application/x-gzip,application/zip",
@@ -121,10 +137,8 @@ impl RepoClient {
 
         let download_size = response.content_length();
 
-        let content_type =
-            content_type(&response).ok_or_else(|| RepoUnpackError::MissingContentType {
-                url: repo_url.clone(),
-            })?;
+        let content_type = content_type(&response)
+            .ok_or_else(|| RepoUnpackError::MissingContentType { url: url.clone() })?;
 
         trace!(%content_type);
 
@@ -153,70 +167,115 @@ impl RepoClient {
             _ => {
                 return Err(RepoUnpackError::UnsupportedContentType {
                     content_type: content_type.to_string(),
-                    url: repo_url.clone(),
+                    url: url.clone(),
                 }
                 .into());
             }
         };
 
-        let repo = Arc::new(Mutex::new(Repository::default()));
-        let repo_url = Arc::new(repo_url);
+        let url = Arc::new(url);
+        // let (item_tx, item_rx) = mpsc::channel(32);
+        let mut db = self.database.get()?;
 
-        unpacker
-            .try_for_each_concurrent(None, |mut asset| {
-                let repo = repo.clone();
-                let progress = progress.clone();
-                let repo_url = repo_url.clone();
+        // Add our repo to database first so we can use its ID when inserting other things.
+        let new_repo = RepositoryRef::new(name, &url);
 
-                async move {
-                    match apply_resource(&repo, &mut asset) {
-                        Ok(_) => {
-                            progress.report_unpacked_item();
-                            Ok(())
-                        }
-                        Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
-                            source: err,
-                            url: (*repo_url).clone().into(),
-                            path: asset.path,
-                        })?,
-                        Err(err) => Err(err),
+        let repo_id: i32 = insert_into(repositories::table)
+            .values(new_repo)
+            .on_conflict_do_nothing()
+            .returning(repositories::repo_id)
+            .get_result(&mut db)?;
+
+        while let Some(mut asset) = unpacker.try_next().await? {
+            let progress = progress.clone();
+            let repo_url = url.clone();
+            // let slot = item_tx.reserve().await.unwrap();
+            // let mut mgr = self.clone();
+
+            spawn(async move {
+                match apply_resource(&mut asset, repo_id) {
+                    Ok(asset) => {
+                        progress.report_unpacked_item();
+                        println!("{asset:?}");
+                        Ok(())
                     }
+                    Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
+                        source: err,
+                        url: (*repo_url).clone().into(),
+                        path: asset.path,
+                    })?,
+                    Err(err) => Err(err),
                 }
-            })
-            .await?;
-
-        let repo = Arc::into_inner(repo).unwrap().into_inner().unwrap();
-
-        println!("mod[0] = {:?}", repo.modules.iter().next());
-        println!("dc[0] = {:?}", repo.download_counts.iter().next());
-        println!("versions = {:?}", repo.known_game_versions);
-        println!("repo refs = {:?}", repo.repositories);
-        println!("unsupported_spec = {:?}", repo.unsupported_spec);
-
-        // As each file in the archive is received, begin decoding it in parallel.
-
-        // let (tx, rx) = mpsc::channel();
-
-        // let db_task = spawn_blocking(|| {
-        //     self.database.transaction(|txn| Ok::<_, Error>(()))?;
-
-        //     Ok::<_, Error>(())
-        // });
-
-        // while let Some(item) = unpacker.try_next().await? {
-        //     let tx = tx.clone();
-
-        //     spawn(async move {
-        //         match item.variant {
-        //             RepoItemVariant::Module => {}
-        //             _ => todo!()
-        //         }
-        //     });
-        // }
-
-        // db_task.await.unwrap()?;
+            });
+        }
 
         Ok(())
+    }
+}
+
+fn apply_resource(asset: &mut RepoAssetBuf, repo_id: i32) -> Result<RepoAsset> {
+    match asset.variant {
+        RepoAssetVariant::Release => {
+            let parsed: JsonModule = simd_json::from_slice(&asset.data)?;
+            parsed.verify()?;
+
+            let module = NewModule {
+                repo_id,
+                module_name: parsed.name.into(),
+            };
+
+            let release = NewModuleRelease {
+                module_id: 0, // Unknown until inserted
+                version: parsed.version,
+                kind: parsed.kind,
+                summary: parsed.r#abstract,
+                metadata: ReleaseMetadata {
+                    comment: parsed.comment,
+                    download: parsed.download,
+                    download_content_type: parsed.download_content_type,
+                    download_hash: parsed.download_hash,
+                    install: parsed.install,
+                    resources: parsed.resources,
+                },
+                description: parsed.description,
+                release_status: parsed.release_status,
+                game_version: if !parsed.ksp_version.is_empty() {
+                    parsed.ksp_version.into()
+                } else {
+                    parsed.ksp_version_min.into()
+                },
+                game_version_min: parsed.ksp_version_min.into(),
+                game_version_strict: parsed.ksp_version_strict,
+                download_size: parsed.download_size,
+                install_size: parsed.install_size,
+                release_date: parsed.release_date,
+            };
+
+            Ok(RepoAsset::Release { module, release: release.into() })
+        }
+        RepoAssetVariant::DownloadCounts => {
+            let map = simd_json::from_slice(&asset.data)?;
+            Ok(RepoAsset::DownloadCounts(map))
+        }
+        RepoAssetVariant::RepositoryRefList => {
+            let parsed: RepositoryRefList = simd_json::from_slice(&asset.data)?;
+            Ok(RepoAsset::RepositoryRefList(parsed))
+        }
+        RepoAssetVariant::Builds => {
+            let parsed: JsonBuilds = simd_json::from_slice(&asset.data)?;
+            let versions = parsed
+                .builds
+                .into_iter()
+                .map(|(build_id, version)| {
+                    Ok(Build {
+                        build_id,
+                        version: version.parse()?,
+                    })
+                })
+                .collect::<Result<_, RepoUnpackError>>()?;
+
+            Ok(RepoAsset::Builds(versions))
+        }
     }
 }
 
@@ -279,39 +338,16 @@ fn content_type(response: &Response) -> Option<Cow<'static, str>> {
     None
 }
 
-fn apply_resource(repo: &Mutex<Repository>, mut asset: &mut RepoAsset) -> Result<()> {
-    match asset.variant {
-        RepoAssetVariant::Builds => {
-            let parsed: JsonBuilds = simd_json::from_slice(&mut asset.data)?;
-            let versions = parsed
-                .builds
-                .values()
-                .map(|s| Ok(s.parse()?))
-                .collect::<Result<Vec<GameVersion>, RepoUnpackError>>()?;
-
-            let mut repo = repo.lock().unwrap();
-            repo.known_game_versions.extend(versions);
-        }
-        RepoAssetVariant::DownloadCounts => {}
-        RepoAssetVariant::Module => {
-            let parsed: JsonModule = simd_json::from_slice(&mut asset.data)?;
-        }
-        RepoAssetVariant::RepositoryRefs => {}
-    }
-
-    Ok(())
-}
-
-trait RepoUnpacker {
-    /// Returns a stream of items in the repository as they are downloaded.
-    fn asset_stream(self) -> Result<impl Stream<Item = Result<RepoAsset>>>;
-}
-
-enum RepoAssetVariant {
-    Module,
-    Builds,
-    DownloadCounts,
-    RepositoryRefs,
+#[derive(Debug, From, EnumDiscriminants)]
+#[strum_discriminants(name(RepoAssetVariant))]
+enum RepoAsset {
+    Builds(Vec<Build>),
+    Release {
+        module: NewModule<'static>,
+        release: Box<NewModuleRelease>,
+    },
+    DownloadCounts(HashMap<String, i32>),
+    RepositoryRefList(RepositoryRefList),
 }
 
 impl RepoAssetVariant {
@@ -320,18 +356,23 @@ impl RepoAssetVariant {
 
         Some(match filename.as_encoded_bytes() {
             b"builds.json" => Self::Builds,
-            b"repositories.json" => Self::RepositoryRefs,
+            b"repositories.json" => Self::RepositoryRefList,
             b"download_counts.json" => Self::DownloadCounts,
-            name if name.ends_with(b".ckan") => Self::Module,
+            name if name.ends_with(b".ckan") => Self::Release,
             _ => return None,
         })
     }
 }
 
-struct RepoAsset {
+struct RepoAssetBuf {
     path: PathBuf,
     variant: RepoAssetVariant,
     data: Box<[u8]>,
+}
+
+trait RepoUnpacker {
+    /// Returns a stream of items in the repository as they are downloaded.
+    fn asset_stream(self) -> Result<impl Stream<Item = Result<RepoAssetBuf>>>;
 }
 
 /// Unpacks a gzipped tar archive of a repository.
@@ -348,7 +389,7 @@ impl<R: AsyncBufRead + Unpin> TarGzUnpacker<R> {
 }
 
 impl<R: AsyncBufRead + Unpin> RepoUnpacker for TarGzUnpacker<R> {
-    fn asset_stream(mut self) -> Result<impl Stream<Item = Result<RepoAsset>>> {
+    fn asset_stream(mut self) -> Result<impl Stream<Item = Result<RepoAssetBuf>>> {
         let entries = self.archive.entries()?;
 
         Ok(entries
@@ -362,7 +403,7 @@ impl<R: AsyncBufRead + Unpin> RepoUnpacker for TarGzUnpacker<R> {
                 let mut buf = Vec::new();
                 item.read_to_end(&mut buf).await?;
 
-                let asset = RepoAsset {
+                let asset = RepoAssetBuf {
                     variant,
                     path,
                     data: buf.into_boxed_slice(),
@@ -370,21 +411,5 @@ impl<R: AsyncBufRead + Unpin> RepoUnpacker for TarGzUnpacker<R> {
 
                 Ok(Some(asset))
             }))
-    }
-}
-
-struct ZipUnpacker {}
-
-impl ZipUnpacker {
-    fn unpack(stream: impl Stream<Item = Result<Bytes>>) -> Self {
-        todo!()
-    }
-}
-
-impl Stream for ZipUnpacker {
-    type Item = Result<RepoAsset>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        todo!()
     }
 }

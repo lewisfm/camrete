@@ -6,11 +6,35 @@ pub mod spec_version;
 
 use std::{borrow::Cow, collections::HashMap};
 
-use game_version::GameVersionSpec;
-use serde::Deserialize;
+use derive_more::TryFrom;
+use game_version::MetaGameVersion;
+use miette::Diagnostic;
+use serde::{Deserialize, Serialize};
 use spec_version::SpecVersion;
+use thiserror::Error;
 use time::{OffsetDateTime, serde::iso8601};
 use url::Url;
+
+use crate::{models::RepositoryRef, repo::game::GameVersion};
+
+#[derive(Debug, Error, Diagnostic)]
+pub enum JsonError {
+    #[error(
+        "The module incorrectly specifies both `ksp_version` (as {:?}) and `{}` (as {:?}).",
+        generic_constraint,
+        if *specific_is_max { "ksp_version_max" } else { "ksp_version_min" },
+        specific_constraint,
+    )]
+    #[diagnostic(code(camrete::json::duplicate_module_version_constraint))]
+    DuplicateVersionConstraint {
+        generic_constraint: GameVersion,
+        specific_is_max: bool,
+        specific_constraint: GameVersion,
+    },
+    #[diagnostic(code(camrete::json::parse))]
+    #[error(transparent)]
+    Parse(#[from] simd_json::Error),
+}
 
 #[derive(Debug, Deserialize)]
 pub struct JsonModule {
@@ -22,6 +46,8 @@ pub struct JsonModule {
     pub kind: ModuleKind,
     pub r#abstract: String,
     pub description: Option<String>,
+    #[serde(default)]
+    pub release_status: ReleaseStatus,
     pub comment: Option<String>,
     #[serde(with = "one_or_many")]
     pub author: Vec<String>,
@@ -29,22 +55,24 @@ pub struct JsonModule {
     #[serde(default)]
     pub download: Vec<Url>,
     #[serde(default)]
-    pub download_size: Option<u32>,
+    pub download_size: Option<i64>,
     #[serde(default)]
-    pub download_hash: ModuleChecksum,
+    pub download_hash: DownloadChecksum,
     #[serde(default)]
     pub download_content_type: Option<String>,
     #[serde(default)]
-    pub install_size: Option<u32>,
+    pub install_size: Option<i64>,
     #[serde(with = "one_or_many")]
     #[serde(default)]
     pub license: Vec<String>,
     #[serde(default)]
-    pub ksp_version: GameVersionSpec,
+    pub ksp_version: MetaGameVersion,
     #[serde(default)]
-    pub ksp_version_min: GameVersionSpec,
+    pub ksp_version_min: MetaGameVersion,
     #[serde(default)]
-    pub ksp_version_max: GameVersionSpec,
+    pub ksp_version_max: MetaGameVersion,
+    #[serde(default)]
+    pub ksp_version_strict: bool,
     #[serde(default)]
     pub resources: ModuleResources,
     #[serde(default)]
@@ -59,16 +87,45 @@ pub struct JsonModule {
     pub release_date: Option<OffsetDateTime>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+impl JsonModule {
+    pub fn verify(&self) -> Result<(), JsonError> {
+        if !self.ksp_version.is_empty() {
+            let has_max = !self.ksp_version_max.is_empty();
+            if has_max || !self.ksp_version_min.is_empty() {
+                return Err(JsonError::DuplicateVersionConstraint {
+                    generic_constraint: *self.ksp_version,
+                    specific_is_max: has_max,
+                    specific_constraint: if has_max {
+                        *self.ksp_version_max
+                    } else {
+                        *self.ksp_version_min
+                    },
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize, Default, TryFrom)]
 #[serde(rename_all = "lowercase")]
+#[try_from(repr)]
+#[repr(i32)]
 pub enum ModuleKind {
     #[default]
-    Package,
+    Package = 0,
     Metapackage,
     Dlc,
 }
 
-#[derive(Debug, Deserialize, Default)]
+impl From<ModuleKind> for i32 {
+    fn from(value: ModuleKind) -> Self {
+        value as i32
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ModuleResources {
     pub homepage: Option<String>,
     pub spacedock: Option<String>,
@@ -79,7 +136,7 @@ pub struct ModuleResources {
     pub x_screenshot: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MetaRelationship {
     #[serde(flatten)]
     pub descriptor: RelationshipDescriptor,
@@ -89,14 +146,14 @@ pub struct MetaRelationship {
     pub suppress_recommendations: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RelationshipDescriptor {
     Direct(DirectRelationshipDescriptor),
     AnyOf(AnyOfRelationshipDescriptor),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DirectRelationshipDescriptor {
     pub name: String,
     #[serde(default)]
@@ -107,20 +164,20 @@ pub struct DirectRelationshipDescriptor {
     pub version: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AnyOfRelationshipDescriptor {
     pub any_of: Vec<MetaRelationship>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct ModuleChecksum {
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct DownloadChecksum {
     #[serde(default)]
     pub sha1: Option<String>,
     #[serde(default)]
     pub sha256: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleInstallDescriptor {
     #[serde(flatten)]
     pub source: ModuleInstallSourceDirective,
@@ -143,7 +200,7 @@ pub struct ModuleInstallDescriptor {
     pub include_only_regexp: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModuleInstallSourceDirective {
     File(String),
@@ -151,7 +208,29 @@ pub enum ModuleInstallSourceDirective {
     FindRegexp(String),
 }
 
+#[derive(Debug, Serialize, Deserialize, Default, TryFrom)]
+#[serde(rename_all = "snake_case")]
+#[try_from(repr)]
+#[repr(i32)]
+pub enum ReleaseStatus {
+    #[default]
+    Stable = 0,
+    Testing,
+    Development,
+}
+
+impl From<ReleaseStatus> for i32 {
+    fn from(value: ReleaseStatus) -> Self {
+        value as i32
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct JsonBuilds<'a> {
-    pub builds: HashMap<Cow<'a, str>, Cow<'a, str>>,
+    pub builds: HashMap<i32, Cow<'a, str>>,
+}
+
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Hash)]
+pub struct RepositoryRefList {
+    pub repositories: Vec<RepositoryRef<'static>>,
 }

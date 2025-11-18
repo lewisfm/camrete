@@ -1,47 +1,47 @@
-// @generated automatically by Diesel CLI.
+use diesel::{table, joinable, allow_tables_to_appear_in_same_query};
 
-diesel::table! {
+table! {
     builds (build_id) {
         build_id -> Integer,
-        version -> Text,
+        version -> Binary,
     }
 }
 
-diesel::table! {
+table! {
     etags (url) {
-        url -> Text,
+        url -> Binary,
         etag -> Text,
     }
 }
 
-diesel::table! {
+table! {
     module_authors (id) {
-        id -> Nullable<Integer>,
+        id -> Integer,
         release_id -> Integer,
         ordinal -> Integer,
         author -> Text,
     }
 }
 
-diesel::table! {
+table! {
     module_licenses (id) {
-        id -> Nullable<Integer>,
+        id -> Integer,
         release_id -> Integer,
         license -> Text,
     }
 }
 
-diesel::table! {
+table! {
     module_localizations (id) {
-        id -> Nullable<Integer>,
+        id -> Integer,
         release_id -> Integer,
         locale -> Text,
     }
 }
 
-diesel::table! {
+table! {
     module_relationship_groups (group_id) {
-        group_id -> Nullable<Integer>,
+        group_id -> Integer,
         release_id -> Integer,
         ordinal -> Integer,
         rel_type -> Integer,
@@ -50,9 +50,9 @@ diesel::table! {
     }
 }
 
-diesel::table! {
+table! {
     module_relationships (relationship_id) {
-        relationship_id -> Nullable<Integer>,
+        relationship_id -> Integer,
         group_id -> Integer,
         ordinal -> Integer,
         target_name -> Text,
@@ -61,30 +61,29 @@ diesel::table! {
     }
 }
 
-diesel::table! {
+table! {
     module_releases (release_id) {
-        release_id -> Nullable<Integer>,
+        release_id -> Integer,
         module_id -> Integer,
         version -> Text,
         sort_index -> Integer,
         summary -> Text,
         metadata -> Binary,
         description -> Nullable<Text>,
-        release_status -> Nullable<Integer>,
-        game_version -> Nullable<Text>,
-        game_version_min -> Nullable<Text>,
-        game_version_strict -> Integer,
-        download_size -> Nullable<Integer>,
-        download_content_type -> Nullable<Text>,
-        install_size -> Nullable<Integer>,
-        release_date -> Nullable<Text>,
+        release_status -> Integer,
+        game_version -> Binary,
+        game_version_min -> Binary,
+        game_version_strict -> Bool,
+        download_size -> Nullable<BigInt>,
+        install_size -> Nullable<BigInt>,
+        release_date -> Nullable<TimestamptzSqlite>,
         kind -> Integer,
     }
 }
 
-diesel::table! {
+table! {
     module_replacements (replacement_id) {
-        replacement_id -> Nullable<Integer>,
+        replacement_id -> Integer,
         release_id -> Integer,
         target_name -> Text,
         target_version -> Nullable<Text>,
@@ -92,28 +91,28 @@ diesel::table! {
     }
 }
 
-diesel::table! {
+table! {
     module_tags (id) {
-        id -> Nullable<Integer>,
+        id -> Integer,
         release_id -> Integer,
         ordinal -> Integer,
         tag -> Text,
     }
 }
 
-diesel::table! {
+table! {
     modules (module_id) {
-        module_id -> Nullable<Integer>,
+        module_id -> Integer,
         repo_id -> Integer,
         module_name -> Text,
         download_count -> Integer,
     }
 }
 
-diesel::table! {
+table! {
     repositories (repo_id) {
-        repo_id -> Nullable<Integer>,
-        url -> Text,
+        repo_id -> Integer,
+        url -> Binary,
         name -> Text,
         priority -> Integer,
         x_mirror -> Bool,
@@ -121,28 +120,28 @@ diesel::table! {
     }
 }
 
-diesel::table! {
+table! {
     repository_refs (referrer_repo_url, url) {
-        referrer_repo_url -> Text,
+        referrer_repo_url -> Binary,
         name -> Text,
-        url -> Text,
+        url -> Binary,
         priority -> Integer,
         x_mirror -> Integer,
         x_comment -> Nullable<Text>,
     }
 }
 
-diesel::joinable!(module_authors -> module_releases (release_id));
-diesel::joinable!(module_licenses -> module_releases (release_id));
-diesel::joinable!(module_localizations -> module_releases (release_id));
-diesel::joinable!(module_relationship_groups -> module_releases (release_id));
-diesel::joinable!(module_relationships -> module_relationship_groups (group_id));
-diesel::joinable!(module_releases -> modules (module_id));
-diesel::joinable!(module_replacements -> module_releases (release_id));
-diesel::joinable!(module_tags -> module_releases (release_id));
-diesel::joinable!(modules -> repositories (repo_id));
+joinable!(module_authors -> module_releases (release_id));
+joinable!(module_licenses -> module_releases (release_id));
+joinable!(module_localizations -> module_releases (release_id));
+joinable!(module_relationship_groups -> module_releases (release_id));
+joinable!(module_relationships -> module_relationship_groups (group_id));
+joinable!(module_releases -> modules (module_id));
+joinable!(module_replacements -> module_releases (release_id));
+joinable!(module_tags -> module_releases (release_id));
+joinable!(modules -> repositories (repo_id));
 
-diesel::allow_tables_to_appear_in_same_query!(
+allow_tables_to_appear_in_same_query!(
     builds,
     etags,
     module_authors,

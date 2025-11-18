@@ -1,14 +1,9 @@
 //! (De)serializing method which represents no items as null,
 //! one item as that item itself, and many items as a list.
 
-use std::{
-    fmt::{self, Formatter},
-    marker::PhantomData,
-};
 
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
-    de::{self, Unexpected, Visitor},
 };
 
 pub fn deserialize<'a, T, D>(d: D) -> Result<Vec<T>, D::Error>
