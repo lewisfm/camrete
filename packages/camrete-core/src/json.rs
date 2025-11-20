@@ -15,7 +15,10 @@ use thiserror::Error;
 use time::{OffsetDateTime, serde::iso8601};
 use url::Url;
 
-use crate::{database::models::RepositoryRef, repo::game::GameVersion};
+use crate::{
+    database::models::{RepositoryRef, module::RelationshipType},
+    repo::game::GameVersion,
+};
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum JsonError {
@@ -31,11 +34,15 @@ pub enum JsonError {
         specific_is_max: bool,
         specific_constraint: GameVersion,
     },
+    #[error("The module incorrectly specifies `max_version` in its `replaced_by` relationship.")]
+    #[diagnostic(code(camrete::json::disallowed_replaced_by_max_version))]
+    DisallowedMaxVersionInReplacement,
     #[diagnostic(code(camrete::json::parse))]
     #[error(transparent)]
     Parse(#[from] simd_json::Error),
 }
 
+/// A full complete release of a module, suitable for encoding into JSON.
 #[derive(Debug, Deserialize)]
 pub struct JsonModule {
     pub spec_version: SpecVersion,
@@ -78,9 +85,19 @@ pub struct JsonModule {
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
-    pub depends: Vec<RelationshipDescriptor>,
+    pub localizations: Vec<String>,
     #[serde(default)]
-    pub conflicts: Vec<RelationshipDescriptor>,
+    pub depends: Vec<MetaRelationship>,
+    #[serde(default)]
+    pub recommends: Vec<MetaRelationship>,
+    #[serde(default)]
+    pub suggests: Vec<MetaRelationship>,
+    #[serde(default)]
+    pub supports: Vec<MetaRelationship>,
+    #[serde(default)]
+    pub conflicts: Vec<MetaRelationship>,
+    #[serde(default)]
+    pub replaced_by: Option<DirectRelationshipDescriptor>,
     #[serde(default)]
     pub install: Vec<ModuleInstallDescriptor>,
     #[serde(with = "iso8601::option", default)]
@@ -104,11 +121,28 @@ impl JsonModule {
             }
         }
 
+        if let Some(replaced_by) = &self.replaced_by
+            && replaced_by.max_version.is_some()
+        {
+            return Err(JsonError::DisallowedMaxVersionInReplacement);
+        }
+
         Ok(())
+    }
+
+    /// Returns all relationships (not including any replaced_by specs) alongside their corresponding types.
+    pub fn relationships(
+        &self,
+    ) -> impl Iterator<Item = (RelationshipType, &MetaRelationship)> {
+        self.depends.iter().map(|d| (RelationshipType::Depends, d))
+            .chain(self.recommends.iter().map(|d| (RelationshipType::Recommends, d)))
+            .chain(self.suggests.iter().map(|d| (RelationshipType::Suggests, d)))
+            .chain(self.supports.iter().map(|d| (RelationshipType::Supports, d)))
+            .chain(self.conflicts.iter().map(|d| (RelationshipType::Conflicts, d)))
     }
 }
 
-#[derive(Debug, Deserialize, Default, TryFrom)]
+#[derive(Debug, Deserialize, Default, TryFrom, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 #[try_from(repr)]
 #[repr(i32)]
@@ -125,7 +159,7 @@ impl From<ModuleKind> for i32 {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct ModuleResources {
     pub homepage: Option<String>,
     pub spacedock: Option<String>,
@@ -153,6 +187,25 @@ pub enum RelationshipDescriptor {
     AnyOf(AnyOfRelationshipDescriptor),
 }
 
+impl RelationshipDescriptor {
+    pub fn flatten<'a>(&'a self) -> Vec<&'a DirectRelationshipDescriptor> {
+        let mut members = vec![];
+        self.flatten_inner(&mut members);
+        members
+    }
+
+    fn flatten_inner<'a>(&'a self, list: &mut Vec<&'a DirectRelationshipDescriptor>) {
+        match self {
+            Self::Direct(d) => list.push(d),
+            Self::AnyOf(d) => {
+                for relation in &d.any_of {
+                    relation.descriptor.flatten_inner(list);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DirectRelationshipDescriptor {
     pub name: String,
@@ -169,7 +222,7 @@ pub struct AnyOfRelationshipDescriptor {
     pub any_of: Vec<MetaRelationship>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct DownloadChecksum {
     #[serde(default)]
     pub sha1: Option<String>,
@@ -177,7 +230,7 @@ pub struct DownloadChecksum {
     pub sha256: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModuleInstallDescriptor {
     #[serde(flatten)]
     pub source: ModuleInstallSourceDirective,
@@ -200,7 +253,7 @@ pub struct ModuleInstallDescriptor {
     pub include_only_regexp: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ModuleInstallSourceDirective {
     File(String),
@@ -208,7 +261,7 @@ pub enum ModuleInstallSourceDirective {
     FindRegexp(String),
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, TryFrom)]
+#[derive(Debug, Serialize, Deserialize, Default, TryFrom, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 #[try_from(repr)]
 #[repr(i32)]

@@ -2,9 +2,7 @@ CREATE TABLE repositories (
     repo_id INTEGER PRIMARY KEY NOT NULL,
     name TEXT UNIQUE NOT NULL,
     url BLOB NOT NULL,
-    priority INTEGER NOT NULL,
-    x_mirror BOOLEAN NOT NULL,
-    x_comment TEXT
+    priority INTEGER NOT NULL
 );
 
 CREATE TABLE modules (
@@ -151,7 +149,5 @@ CREATE TABLE repository_refs (
     name TEXT NOT NULL,
     url BLOB NOT NULL,
     priority INTEGER NOT NULL,
-    x_mirror INTEGER NOT NULL,
-    x_comment TEXT,
     PRIMARY KEY (referrer_id, name)
 );

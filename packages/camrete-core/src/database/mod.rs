@@ -1,39 +1,52 @@
 use std::{
     any::type_name,
+    borrow::Cow,
     collections::HashMap,
     fmt::{Debug, Formatter, Pointer},
     marker::PhantomData,
-    ops::DerefMut,
+    ops::{Deref, DerefMut},
     sync::Arc,
 };
 
 use derive_more::From;
 use diesel::{
-    Connection, ExpressionMethods, Queryable, RunQueryDsl, SqliteConnection,
     backend::Backend,
+    delete,
     deserialize::FromSql,
     expression::AsExpression,
-    insert_into, replace_into,
+    insert_into,
+    prelude::*,
+    replace_into,
     serialize::{Output, ToSql},
     sql_types::Integer,
-    update,
     upsert::excluded,
 };
 use reqwest::header::HeaderValue;
+use tokio::{runtime::Handle, task::{block_in_place, spawn_blocking}};
 use tracing::{debug, info, instrument, trace};
 use url::Url;
 
 use crate::{
     DbConnection, Error,
     database::{
-        models::{Build, NewModule, NewRelease, RepositoryRef, helpers::JsonbValue},
-        schema::{modules, repositories},
+        models::{
+            Build, NewModule, NewRelease, ReleaseMetadata, Repository, RepositoryRef,
+            module::{
+                NewModuleAuthor, NewModuleLocale, NewModuleRelationship,
+                NewModuleRelationshipGroup, NewModuleTag,
+            },
+        },
+        schema::*,
     },
+    json::{DownloadChecksum, JsonModule, RelationshipDescriptor},
     repo::client::RepoUnpackError,
 };
 
+mod helpers;
 pub mod models;
 pub mod schema;
+
+pub use helpers::*;
 
 #[derive(From)]
 pub struct RepoDB<T> {
@@ -54,16 +67,42 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         self.connection.transaction(|conn| func(RepoDB::new(conn)))
     }
 
+    /// Fetches all repositories from the database, ordered by name. If `create_default` is specified and
+    /// no repos currently exist, the default repo will be created and returned.
+    #[instrument(skip(self))]
+    pub fn all_repos(&mut self, create_default: bool) -> QueryResult<Vec<Repository>> {
+        use schema::repositories::dsl::*;
+
+        debug!("Loading repository list");
+
+        let mut repos = Repository::all().get_results(&mut *self.connection)?;
+
+        if create_default && repos.is_empty() {
+            info!("Creating default repository");
+
+            let default_url =
+                Url::parse("https://github.com/KSP-CKAN/CKAN-meta/archive/master.tar.gz").unwrap();
+            let default_repo = RepositoryRef::shared("KSP-default", &default_url);
+
+            repos = insert_into(repositories)
+                .values(default_repo)
+                .returning(Repository::as_returning())
+                .get_results(&mut *self.connection)?;
+        }
+
+        Ok(repos)
+    }
+
     /// Create a new repository with the given name. Any previous repository
     /// with the same name will be overwritten.
     #[instrument(skip_all)]
-    pub fn create_empty_repo(&mut self, new_repo: RepositoryRef<'_>) -> Result<RepoId, Error> {
+    pub fn create_empty_repo(&mut self, new_repo: RepositoryRef<'_>) -> QueryResult<RepoId> {
         use schema::repositories::dsl::*;
 
         info!(
             name = ?new_repo.name,
             url = ?new_repo.url,
-            "Creating a new repository"
+            "Creating an empty repository"
         );
 
         let id = replace_into(repositories)
@@ -77,7 +116,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
     /// Register a module with the given name. This will never overwrite any module, it just
     /// ensures one exists and returns its ID.
     #[instrument(skip_all)]
-    pub fn register_module(&mut self, new_module: NewModule) -> Result<ModuleId, Error> {
+    pub fn register_module(&mut self, new_module: NewModule) -> QueryResult<ModuleId> {
         use schema::modules::dsl::*;
 
         debug!(
@@ -99,26 +138,141 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
 
     /// Add a release to an existing module.
     #[instrument(skip_all)]
-    pub fn create_release(&mut self, new_release: NewRelease) -> Result<ReleaseId, Error> {
-        use schema::module_releases::dsl::*;
-
+    pub fn create_release(&mut self, json: &JsonModule, repo_id: RepoId) -> QueryResult<ReleaseId> {
         debug!(
-            mod_id = ?new_release.module_id,
-            version = ?new_release.version,
+            mod_name = ?json.name,
+            version = ?json.version,
             "Creating release"
         );
 
-        let id = replace_into(module_releases)
+        let module_id = self.register_module(NewModule {
+            repo_id,
+            module_name: &json.name,
+        })?;
+
+        let metadata = ReleaseMetadata {
+            comment: json.comment.as_deref().map(Cow::Borrowed),
+            download: Cow::Borrowed(&json.download),
+            download_content_type: json.download_content_type.as_deref().map(Cow::Borrowed),
+            download_hash: Cow::Borrowed(&json.download_hash),
+            install: Cow::Borrowed(&json.install),
+            resources: Cow::Borrowed(&json.resources),
+        };
+
+        let new_release = NewRelease {
+            module_id,
+            version: &json.version,
+            kind: json.kind,
+            summary: &json.r#abstract,
+            metadata,
+            description: json.description.as_deref(),
+            release_status: json.release_status,
+            game_version: if !json.ksp_version.is_empty() {
+                json.ksp_version.into()
+            } else {
+                json.ksp_version_min.into()
+            },
+            game_version_min: json.ksp_version_min.into(),
+            game_version_strict: json.ksp_version_strict,
+            download_size: json.download_size,
+            install_size: json.install_size,
+            release_date: json.release_date,
+        };
+
+        // Some mods have duplicate releases, which isn't allowed but it's better to ignore that
+        // than to error here.
+        let release_id = replace_into(module_releases::table)
             .values(new_release)
-            .returning(release_id)
+            .returning(module_releases::release_id)
             .get_result::<ReleaseId>(&mut *self.connection)?;
 
-        Ok(id)
+        // Add auxiliary many-to-one tables - tags, authors, locales, dependencies.
+        // These aren't included in the encoded metadata so they can be easily searched.
+
+        let tags = json
+            .localizations
+            .iter()
+            .enumerate()
+            .map(|(ordinal, tag)| NewModuleTag {
+                release_id,
+                ordinal: ordinal.try_into().unwrap(),
+                tag,
+            })
+            .collect::<Vec<_>>();
+
+        insert_into(module_tags::table)
+            .values(tags)
+            .execute(&mut *self.connection)?;
+
+        let authors = json
+            .localizations
+            .iter()
+            .enumerate()
+            .map(|(ordinal, author)| NewModuleAuthor {
+                release_id,
+                ordinal: ordinal.try_into().unwrap(),
+                author,
+            })
+            .collect::<Vec<_>>();
+
+        insert_into(module_authors::table)
+            .values(authors)
+            .execute(&mut *self.connection)?;
+
+        let locales = json
+            .localizations
+            .iter()
+            .map(|locale| NewModuleLocale { release_id, locale })
+            .collect::<Vec<_>>();
+
+        insert_into(module_localizations::table)
+            .values(locales)
+            .execute(&mut *self.connection)?;
+
+        // Relationships are a little more complicated because they can be stored either as direct or any_of groups.
+        // In the database these are the same thing, so we have to convert first.
+
+        for (ordinal, (rel_type, relation)) in json.relationships().enumerate() {
+            let group = NewModuleRelationshipGroup {
+                release_id,
+                ordinal: ordinal.try_into().unwrap(),
+                rel_type,
+                choice_help_text: relation.choice_help_text.as_deref(),
+                suppress_recommendations: relation.suppress_recommendations,
+            };
+
+            // Insert by explicitly specifying each column so Diesel can infer the correct InsertValues.
+            // Convert `rel_type` to a SQL-compatible value (here using `.into()` / cast to i32 if appropriate).
+            let group_id = insert_into(module_relationship_groups::table)
+                .values(group)
+                .returning(module_relationship_groups::group_id)
+                .get_result::<DepGroupId>(&mut *self.connection)?;
+
+            let members = relation
+                .descriptor
+                .flatten()
+                .into_iter()
+                .enumerate()
+                .map(|(ordinal, member)| NewModuleRelationship {
+                    group_id,
+                    ordinal: ordinal.try_into().unwrap(),
+                    target_name: &member.name,
+                    target_version: member.max_version.as_deref().or(member.version.as_deref()),
+                    target_version_min: member.min_version.as_deref(),
+                })
+                .collect::<Vec<_>>();
+
+            insert_into(module_relationships::table)
+                .values(members)
+                .execute(&mut *self.connection)?;
+        }
+
+        Ok(release_id)
     }
 
     /// Add the given builds to the build-id/version map.
     #[instrument(skip_all)]
-    pub fn register_builds(&mut self, new_builds: Vec<Build>) -> Result<(), Error> {
+    pub fn register_builds(&mut self, new_builds: Vec<Build>) -> QueryResult<()> {
         use schema::builds::dsl::*;
 
         debug!(count = %new_builds.len(), "Registering new builds");
@@ -133,7 +287,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
     /// Attach the given download counts to their corresponding modules. Creates the modules if they
     /// don't exist yet.
     #[instrument(skip(self, counts))]
-    pub fn add_download_counts<'a, C>(&mut self, repo: RepoId, counts: C) -> Result<(), Error>
+    pub fn add_download_counts<'a, C>(&mut self, repo: RepoId, counts: C) -> QueryResult<()>
     where
         C: IntoIterator<Item = (&'a String, &'a i32)>,
         C::IntoIter: ExactSizeIterator,
@@ -160,7 +314,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
     }
 
     #[instrument(skip(self))]
-    pub fn add_repo_ref(&mut self, referrer: RepoId, new_ref: RepositoryRef) -> Result<(), Error> {
+    pub fn add_repo_ref(&mut self, referrer: RepoId, new_ref: RepositoryRef) -> QueryResult<()> {
         use schema::repository_refs::dsl::*;
 
         replace_into(repository_refs)
@@ -195,80 +349,17 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
     }
 }
 
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, AsExpression)]
-#[diesel(sql_type = Integer)]
-pub struct Id<T>(pub i32, PhantomData<T>);
-
-impl<T> Id<T> {
-    pub fn new(id: i32) -> Self {
-        Self(id, PhantomData)
-    }
-
-    pub fn get(self) -> i32 {
-        self.0
-    }
-}
-
-impl<T> Clone for Id<T> {
-    fn clone(&self) -> Self {
-        *self
+impl<T: DerefMut<Target = SqliteConnection> + Send> RepoDB<T> {
+    #[instrument(skip_all)]
+    pub fn async_transaction<R>(
+        &mut self,
+        func: impl AsyncFnOnce(RepoDB<&mut SqliteConnection>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        trace!("Performing a transaction");
+        block_in_place(|| {
+            self.connection.transaction(|conn| {
+                Handle::current().block_on(async move { func(RepoDB::new(conn)).await })
+            })
+        })
     }
 }
-
-impl<T> Copy for Id<T> {}
-
-impl<T> From<i32> for Id<T> {
-    fn from(value: i32) -> Self {
-        Self::new(value)
-    }
-}
-
-impl<T> From<Id<T>> for i32 {
-    fn from(value: Id<T>) -> Self {
-        value.0
-    }
-}
-
-impl<T: Debug + Default> Debug for Id<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Id<{:?}>({})", T::default(), self.get())
-    }
-}
-
-impl<DB, T: Debug + Default> ToSql<Integer, DB> for Id<T>
-where
-    DB: Backend,
-    i32: ToSql<Integer, DB>,
-{
-    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, DB>) -> diesel::serialize::Result {
-        self.0.to_sql(out)
-    }
-}
-
-impl<DB, T> Queryable<Integer, DB> for Id<T>
-where
-    DB: Backend,
-    i32: FromSql<Integer, DB>,
-{
-    type Row = i32;
-    fn build(id: i32) -> diesel::deserialize::Result<Self> {
-        Ok(id.into())
-    }
-}
-
-mod tag {
-    macro_rules! tag {
-        ($($name:ident),*) => {
-            $(
-            #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-            pub struct $name;
-            )*
-        };
-    }
-
-    tag!(Repo, Module, Release);
-}
-
-pub type RepoId = Id<tag::Repo>;
-pub type ModuleId = Id<tag::Module>;
-pub type ReleaseId = Id<tag::Release>;

@@ -46,7 +46,7 @@ table! {
         ordinal -> Integer,
         rel_type -> Integer,
         choice_help_text -> Nullable<Text>,
-        suppress_recommendations -> Integer,
+        suppress_recommendations -> Bool,
     }
 }
 
@@ -115,8 +115,6 @@ table! {
         url -> Binary,
         name -> Text,
         priority -> Integer,
-        x_mirror -> Bool,
-        x_comment -> Nullable<Text>,
     }
 }
 
@@ -126,8 +124,6 @@ table! {
         name -> Text,
         url -> Binary,
         priority -> Integer,
-        x_mirror -> Bool,
-        x_comment -> Nullable<Text>,
     }
 }
 
