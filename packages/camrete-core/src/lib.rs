@@ -1,19 +1,22 @@
 use std::sync::LazyLock;
 
-use diesel::{prelude::*, r2d2::{ConnectionManager, Pool, PooledConnection}};
+use diesel::{
+    prelude::*,
+    r2d2::{ConnectionManager, Pool, PooledConnection},
+};
 use directories::ProjectDirs;
 use miette::Diagnostic;
-use repo::{client::RepoUnpackError};
+use repo::client::RepoUnpackError;
 use thiserror::Error;
 
 use crate::json::JsonError;
 
 extern crate serde_json as simd_json;
 
+pub mod database;
+mod io;
 pub mod json;
 pub mod repo;
-mod io;
-pub mod database;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub type DbPool = Pool<ConnectionManager<SqliteConnection>>;
@@ -22,7 +25,12 @@ pub type DbConnection = PooledConnection<ConnectionManager<SqliteConnection>>;
 pub static DIRS: LazyLock<ProjectDirs> =
     LazyLock::new(|| ProjectDirs::from("", "", "CKAN").expect("user home dir available"));
 
-static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"), " <https://github.com/lewisfm/camrete>");
+static USER_AGENT: &str = concat!(
+    env!("CARGO_PKG_NAME"),
+    "/",
+    env!("CARGO_PKG_VERSION"),
+    " <https://github.com/lewisfm/camrete>"
+);
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum Error {

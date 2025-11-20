@@ -1,9 +1,6 @@
 use camrete_core::database::models::RepositoryRef;
 use camrete_core::repo::client::{DirUnpacker, DownloadProgressReporter, RepoManager};
-use criterion::async_executor::AsyncExecutor;
-use criterion::{Criterion, criterion_group, criterion_main};
-use std::env::current_dir;
-use std::hint::black_box;
+use criterion::{Criterion, criterion_main};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

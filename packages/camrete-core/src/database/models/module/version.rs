@@ -1,10 +1,12 @@
 use std::{
-    borrow::{Borrow, Cow},
+    borrow::Cow,
     cmp::Ordering,
     fmt::{Display, Formatter},
 };
 
-use diesel::{Queryable, backend::Backend, deserialize::FromSql, expression::AsExpression, sql_types::Text};
+use diesel::{
+    Queryable, backend::Backend, deserialize::FromSql, expression::AsExpression, sql_types::Text,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, AsExpression)]
 #[diesel(sql_type = Text)]
@@ -118,7 +120,7 @@ impl Ord for ModuleVersion<'_> {
             }
         }
 
-        left.cmp(&right)
+        left.cmp(right)
     }
 }
 
@@ -131,8 +133,8 @@ fn str_cmp(left: &mut &str, right: &mut &str) -> Ordering {
 
     // Override a leading dot to have a high priority, e.g. `.abc` > `abc`
 
-    let left_is_dot = left_prefix.chars().next() == Some('.');
-    let right_is_dot = right_prefix.chars().next() == Some('.');
+    let left_is_dot = left_prefix.starts_with('.');
+    let right_is_dot = right_prefix.starts_with('.');
 
     if left_is_dot || right_is_dot {
         let dot_cmp = left_is_dot.cmp(&right_is_dot);
@@ -143,7 +145,7 @@ fn str_cmp(left: &mut &str, right: &mut &str) -> Ordering {
 
     // Compare lexicographically
 
-    left_prefix.cmp(&right_prefix)
+    left_prefix.cmp(right_prefix)
 }
 
 /// Removes the digit-only prefix from the parameters, then compares those prefixes.
@@ -165,5 +167,5 @@ fn take_prefix<'a>(buf: &mut &'a str, pat: impl FnMut(char) -> bool) -> &'a str 
         return prefix;
     }
 
-    return "";
+    ""
 }

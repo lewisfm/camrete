@@ -1,7 +1,16 @@
-use std::{borrow::Cow, fmt::{Debug, Formatter}, marker::PhantomData};
+use std::{
+    borrow::Cow,
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
+};
 
 use diesel::{
-    Queryable, backend::Backend, deserialize::{FromSql, FromSqlRow}, expression::AsExpression, serialize::{IsNull, Output, ToSql}, sql_types::{Binary, Integer, Jsonb, Nullable}
+    Queryable,
+    backend::Backend,
+    deserialize::{FromSql, FromSqlRow},
+    expression::AsExpression,
+    serialize::{IsNull, Output, ToSql},
+    sql_types::{Binary, Integer, Jsonb, Nullable},
 };
 use serde_json::Value;
 use simd_json::{from_value, to_value};
@@ -87,8 +96,6 @@ pub type RepoId = Id<id::Repo>;
 pub type ModuleId = Id<id::Module>;
 pub type ReleaseId = Id<id::Release>;
 pub type DepGroupId = Id<id::DepGroup>;
-
-
 
 #[derive(Debug, FromSqlRow, AsExpression)]
 #[diesel(sql_type = Binary)]

@@ -1,19 +1,15 @@
-use std::borrow::Cow;
-
-use diesel::{dsl::Select, prelude::*, sqlite::Sqlite};
-use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use url::Url;
+use diesel::{prelude::*, sqlite::Sqlite};
 
 use crate::{
-    Error, database::{JsonbValue, ModuleId, ReleaseId, RepoId, schema::*}, json::{DownloadChecksum, ModuleInstallDescriptor, ModuleKind, ModuleResources, ReleaseStatus}, repo::game::GameVersion
+    database::{JsonbValue, schema::*},
+    repo::game::GameVersion,
 };
 
-pub mod repository;
 pub mod module;
+pub mod repository;
 
-pub use repository::{Repository, RepositoryRef};
 pub use module::{Module, ModuleRelease, NewModule, NewRelease, ReleaseMetadata};
+pub use repository::{Repository, RepositoryRef};
 
 #[derive(Debug, Queryable, Selectable, Insertable)]
 #[diesel(table_name = builds)]

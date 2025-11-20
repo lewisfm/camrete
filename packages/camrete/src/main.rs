@@ -1,14 +1,9 @@
-use std::{
-    env::args,
-    sync::{Arc, LazyLock},
-    time::Duration,
-};
+use std::{sync::LazyLock, time::Duration};
 
-use camrete_core::{database::models::RepositoryRef, repo::client::RepoManager};
+use camrete_core::repo::client::RepoManager;
 use clap::Parser;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
-use url::Url;
 
 #[derive(Debug, clap::Parser)]
 struct Args {
@@ -70,7 +65,6 @@ async fn update(repo_mgr: &mut RepoManager) -> camrete_core::Result<()> {
                         unpack_bar.set_message(format!("{} items unpacked", p.items_unpacked));
                     }
 
-
                     if download_bar.is_finished() {
                         return;
                     }
@@ -83,7 +77,6 @@ async fn update(repo_mgr: &mut RepoManager) -> camrete_core::Result<()> {
                             download_bar.finish();
                         }
                     }
-
                 })
             })
             .await?;
@@ -97,9 +90,11 @@ async fn update(repo_mgr: &mut RepoManager) -> camrete_core::Result<()> {
 
 const PROGRESS_CHARS: &str = "=> ";
 pub static PROGRESS_STYLE_DOWNLOAD: LazyLock<ProgressStyle> = LazyLock::new(|| {
-    ProgressStyle::with_template("Download {percent:>3.bold}% [{bar:40.green}] [{decimal_bytes:>9}/{decimal_total_bytes:9}]")
-        .expect("progress style valid")
-        .progress_chars(PROGRESS_CHARS)
+    ProgressStyle::with_template(
+        "Download {percent:>3.bold}% [{bar:40.green}] [{decimal_bytes:>9}/{decimal_total_bytes:9}]",
+    )
+    .expect("progress style valid")
+    .progress_chars(PROGRESS_CHARS)
 });
 
 pub static PROGRESS_STYLE_SPINNER: LazyLock<ProgressStyle> = LazyLock::new(|| {

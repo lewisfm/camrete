@@ -38,10 +38,7 @@ impl<'a> Deserialize<'a> for SpecVersion {
                         minor: 0,
                     })
                 } else {
-                    Err(de::Error::invalid_value(
-                        Unexpected::Unsigned(v),
-                        &Visit,
-                    ))
+                    Err(de::Error::invalid_value(Unexpected::Unsigned(v), &Visit))
                 }
             }
 
@@ -80,7 +77,7 @@ impl Serialize for SpecVersion {
 
 #[cfg(test)]
 mod test {
-    use serde_test::{assert_tokens, Token};
+    use serde_test::{Token, assert_tokens};
 
     use super::SpecVersion;
 
@@ -88,35 +85,30 @@ mod test {
     fn ser_de_v1_special_case() {
         let v1 = SpecVersion { major: 1, minor: 0 };
 
-        assert_tokens(&v1, &[
-            Token::U64(1),
-        ]);
+        assert_tokens(&v1, &[Token::U64(1)]);
     }
 
     #[test]
     fn ser_de_v1_minor() {
         let v1 = SpecVersion { major: 1, minor: 1 };
 
-        assert_tokens(&v1, &[
-            Token::Str("v1.1")
-        ]);
+        assert_tokens(&v1, &[Token::Str("v1.1")]);
     }
 
     #[test]
     fn ser_de_major_only() {
         let v1 = SpecVersion { major: 2, minor: 0 };
 
-        assert_tokens(&v1, &[
-            Token::Str("v2.0")
-        ]);
+        assert_tokens(&v1, &[Token::Str("v2.0")]);
     }
 
     #[test]
     fn ser_de_major_minor() {
-        let v1 = SpecVersion { major: 5, minor: 12 };
+        let v1 = SpecVersion {
+            major: 5,
+            minor: 12,
+        };
 
-        assert_tokens(&v1, &[
-            Token::Str("v5.12")
-        ]);
+        assert_tokens(&v1, &[Token::Str("v5.12")]);
     }
 }

@@ -43,10 +43,7 @@ impl GameVersion {
 
 impl PartialEq for GameVersion {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-            && self.1 == other.1
-            && self.2 == other.2
-            && self.3 == other.3
+        self.0 == other.0 && self.1 == other.1 && self.2 == other.2 && self.3 == other.3
     }
 }
 

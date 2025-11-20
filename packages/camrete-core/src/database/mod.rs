@@ -1,34 +1,14 @@
-use std::{
-    any::type_name,
-    borrow::Cow,
-    collections::HashMap,
-    fmt::{Debug, Formatter, Pointer},
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::{borrow::Cow, ops::DerefMut, sync::Arc};
 
 use derive_more::From;
-use diesel::{
-    backend::Backend,
-    delete,
-    deserialize::FromSql,
-    expression::AsExpression,
-    insert_into,
-    prelude::*,
-    replace_into,
-    serialize::{Output, ToSql},
-    sql_types::Integer,
-    update,
-    upsert::excluded,
-};
+use diesel::{insert_into, prelude::*, replace_into, update, upsert::excluded};
 use reqwest::header::HeaderValue;
-use tokio::{runtime::Handle, task::{block_in_place, spawn_blocking}};
+use tokio::{runtime::Handle, task::block_in_place};
 use tracing::{debug, info, instrument, trace};
 use url::Url;
 
 use crate::{
-    DbConnection, Error,
+    Error,
     database::{
         models::{
             Build, NewModule, NewRelease, ReleaseMetadata, Repository, RepositoryRef,
@@ -39,7 +19,7 @@ use crate::{
         },
         schema::*,
     },
-    json::{DownloadChecksum, JsonModule, RelationshipDescriptor},
+    json::JsonModule,
     repo::client::RepoUnpackError,
 };
 

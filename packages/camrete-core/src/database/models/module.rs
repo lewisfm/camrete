@@ -1,15 +1,22 @@
 use std::borrow::Cow;
 
-use derive_more::Into;
 use diesel::{
-    backend::Backend, dsl::{AsSelect, Eq, Select}, expression::AsExpression, prelude::*, serialize::{IsNull, Output, ToSql}, sql_types::Integer, sqlite::Sqlite
+    dsl::{AsSelect, Eq, Select},
+    expression::AsExpression,
+    prelude::*,
+    serialize::{IsNull, Output, ToSql},
+    sql_types::Integer,
+    sqlite::Sqlite,
 };
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use url::Url;
 
 use crate::{
-    database::{DepGroupId, JsonbValue, ModuleId, ReleaseId, RepoId, models::module::version::ModuleVersion, schema::{self, *}},
+    database::{
+        DepGroupId, JsonbValue, ModuleId, ReleaseId, RepoId,
+        models::module::version::ModuleVersion, schema::*,
+    },
     json::{DownloadChecksum, ModuleInstallDescriptor, ModuleKind, ModuleResources, ReleaseStatus},
     repo::game::GameVersion,
 };

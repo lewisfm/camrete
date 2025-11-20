@@ -131,14 +131,30 @@ impl JsonModule {
     }
 
     /// Returns all relationships (not including any replaced_by specs) alongside their corresponding types.
-    pub fn relationships(
-        &self,
-    ) -> impl Iterator<Item = (RelationshipType, &MetaRelationship)> {
-        self.depends.iter().map(|d| (RelationshipType::Depends, d))
-            .chain(self.recommends.iter().map(|d| (RelationshipType::Recommends, d)))
-            .chain(self.suggests.iter().map(|d| (RelationshipType::Suggests, d)))
-            .chain(self.supports.iter().map(|d| (RelationshipType::Supports, d)))
-            .chain(self.conflicts.iter().map(|d| (RelationshipType::Conflicts, d)))
+    pub fn relationships(&self) -> impl Iterator<Item = (RelationshipType, &MetaRelationship)> {
+        self.depends
+            .iter()
+            .map(|d| (RelationshipType::Depends, d))
+            .chain(
+                self.recommends
+                    .iter()
+                    .map(|d| (RelationshipType::Recommends, d)),
+            )
+            .chain(
+                self.suggests
+                    .iter()
+                    .map(|d| (RelationshipType::Suggests, d)),
+            )
+            .chain(
+                self.supports
+                    .iter()
+                    .map(|d| (RelationshipType::Supports, d)),
+            )
+            .chain(
+                self.conflicts
+                    .iter()
+                    .map(|d| (RelationshipType::Conflicts, d)),
+            )
     }
 }
 
@@ -188,7 +204,7 @@ pub enum RelationshipDescriptor {
 }
 
 impl RelationshipDescriptor {
-    pub fn flatten<'a>(&'a self) -> Vec<&'a DirectRelationshipDescriptor> {
+    pub fn flatten(&self) -> Vec<&DirectRelationshipDescriptor> {
         let mut members = vec![];
         self.flatten_inner(&mut members);
         members

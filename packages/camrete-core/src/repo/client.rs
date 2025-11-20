@@ -2,26 +2,22 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    pin::Pin,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
-    task::{Context, Poll},
 };
 
 use async_compression::tokio::bufread::GzipDecoder;
-use bytes::Bytes;
 use derive_more::From;
 use diesel::{
     connection::SimpleConnection,
-    debug_query, delete, insert_into,
+    delete,
     prelude::*,
     r2d2::{ConnectionManager, Pool},
-    sqlite::Sqlite,
 };
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
-use futures_core::{Stream, stream::BoxStream};
+use futures_core::stream::BoxStream;
 use futures_util::{StreamExt, TryStreamExt, stream::try_unfold};
 use miette::Diagnostic;
 use reqwest::{
@@ -32,8 +28,6 @@ use strum::EnumDiscriminants;
 use tokio::{
     fs::{ReadDir, read, read_dir},
     io::{self, AsyncBufRead, AsyncReadExt},
-    runtime::Handle,
-    spawn,
     task::JoinSet,
 };
 use tokio_tar::Archive;
@@ -44,9 +38,8 @@ use url::Url;
 use crate::{
     DIRS, DbConnection, DbPool, Error, Result, USER_AGENT,
     database::{
-        ModuleId, RepoDB, RepoId,
-        models::{Build, NewModule, NewRelease, ReleaseMetadata, Repository, RepositoryRef},
-        schema::repositories,
+        RepoDB,
+        models::{Build, Repository},
     },
     io::AsyncReadExt as _,
     json::{JsonBuilds, JsonError, JsonModule, RepositoryRefList},
