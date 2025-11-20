@@ -2,22 +2,19 @@ use std::borrow::Cow;
 
 use derive_more::Into;
 use diesel::{
-    backend::Backend,
-    expression::AsExpression,
-    prelude::*,
-    serialize::{IsNull, Output, ToSql},
-    sql_types::Integer,
-    sqlite::Sqlite,
+    backend::Backend, dsl::{AsSelect, Eq, Select}, expression::AsExpression, prelude::*, serialize::{IsNull, Output, ToSql}, sql_types::Integer, sqlite::Sqlite
 };
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use url::Url;
 
 use crate::{
-    database::{DepGroupId, JsonbValue, ModuleId, ReleaseId, RepoId, schema::*},
+    database::{DepGroupId, JsonbValue, ModuleId, ReleaseId, RepoId, models::module::version::ModuleVersion, schema::{self, *}},
     json::{DownloadChecksum, ModuleInstallDescriptor, ModuleKind, ModuleResources, ReleaseStatus},
     repo::game::GameVersion,
 };
+
+mod version;
 
 #[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name = modules)]
@@ -83,6 +80,26 @@ pub struct ModuleRelease {
     pub download_size: Option<i64>,
     pub install_size: Option<i64>,
     pub release_date: Option<OffsetDateTime>,
+}
+
+type AllSortable = Select<module_releases::table, AsSelect<SortableRelease, Sqlite>>;
+
+#[derive(Debug, Queryable, Selectable)]
+#[diesel(table_name = module_releases)]
+#[diesel(check_for_backend(Sqlite))]
+pub struct SortableRelease {
+    pub release_id: ReleaseId,
+    pub version: ModuleVersion<'static>,
+}
+
+impl SortableRelease {
+    pub fn all() -> AllSortable {
+        module_releases::table.select(Self::as_select())
+    }
+
+    pub fn with_parent(mod_id: ModuleId) -> Eq<module_releases::module_id, ModuleId> {
+        module_releases::module_id.eq(mod_id)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

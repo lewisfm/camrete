@@ -64,7 +64,12 @@ async fn update(repo_mgr: &mut RepoManager) -> camrete_core::Result<()> {
                 let unpack_bar = unpack_bar.clone();
 
                 Box::new(move |p| {
-                    unpack_bar.set_message(format!("{} items unpacked", p.items_unpacked));
+                    if p.is_computing_derived_data {
+                        unpack_bar.set_message("Rebuilding derived data...");
+                    } else {
+                        unpack_bar.set_message(format!("{} items unpacked", p.items_unpacked));
+                    }
+
 
                     if download_bar.is_finished() {
                         return;

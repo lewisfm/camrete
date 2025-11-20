@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     pin::Pin,
     sync::{
@@ -22,7 +22,7 @@ use diesel::{
 };
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 use futures_core::{Stream, stream::BoxStream};
-use futures_util::{StreamExt, TryStreamExt};
+use futures_util::{StreamExt, TryStreamExt, stream::try_unfold};
 use miette::Diagnostic;
 use reqwest::{
     Response,
@@ -30,10 +30,11 @@ use reqwest::{
 };
 use strum::EnumDiscriminants;
 use tokio::{
+    fs::{ReadDir, read, read_dir},
     io::{self, AsyncBufRead, AsyncReadExt},
     runtime::Handle,
     spawn,
-    task::{JoinSet, block_in_place},
+    task::JoinSet,
 };
 use tokio_tar::Archive;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
@@ -223,7 +224,7 @@ impl RepoManager {
     }
 
     /// Uses the given unpacker to save a repository to the database.
-    async fn unpack_repo(
+    pub async fn unpack_repo(
         &mut self,
         repo: &Repository,
         unpacker: impl RepoUnpacker<'_>,
@@ -239,16 +240,14 @@ impl RepoManager {
         while let Some(mut asset) = asset_stream.try_next().await? {
             let repo_url = repo_url.clone();
 
-            tasks.spawn_blocking(move || {
-                match parse_asset(&mut asset) {
-                    Ok(asset) => Ok(asset),
-                    Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
-                        source: err,
-                        url: repo_url,
-                        path: asset.path,
-                    })?,
-                    Err(err) => Err(err),
-                }
+            tasks.spawn_blocking(move || match parse_asset(&mut asset) {
+                Ok(asset) => Ok(asset),
+                Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
+                    source: err,
+                    url: repo_url,
+                    path: asset.path,
+                })?,
+                Err(err) => Err(err),
             });
         }
 
@@ -264,16 +263,21 @@ impl RepoManager {
                 .filter(modules::repo_id.eq(repo.repo_id))
                 .execute(db.connection)?;
 
+            let mut updated_mods = HashSet::new();
+
             while let Some(asset) = tasks.join_next().await {
                 match asset.unwrap()? {
                     RepoAsset::Release(json) => {
-                        db.create_release(&json, repo.repo_id).map_err(|source| {
-                            RepoUnpackError::InsertRelease {
-                                name: json.name,
-                                version: json.version,
-                                source,
-                            }
-                        })?;
+                        let (mod_id, _) =
+                            db.create_release(&json, repo.repo_id).map_err(|source| {
+                                RepoUnpackError::InsertRelease {
+                                    name: json.name,
+                                    version: json.version,
+                                    source,
+                                }
+                            })?;
+
+                        updated_mods.insert(mod_id);
                     }
                     RepoAsset::Builds(builds) => {
                         db.register_builds(builds)
@@ -296,6 +300,11 @@ impl RepoManager {
                 }
 
                 progress.report_unpacked_item();
+            }
+
+            progress.report_indexing();
+            for mod_id in updated_mods {
+                db.update_derived_module_data(mod_id)?;
             }
 
             Ok(())
@@ -339,7 +348,7 @@ fn parse_asset(asset: &mut RepoAssetBuf) -> Result<RepoAsset> {
 }
 
 /// Keeps track of the most recent progress updates and calls an external function when there is a change.
-struct DownloadProgressReporter {
+pub struct DownloadProgressReporter {
     report_fn: Box<dyn Fn(DownloadProgress) + Send + Sync>,
     bytes_downloaded: AtomicU64,
     bytes_expected: Option<u64>,
@@ -366,6 +375,7 @@ impl DownloadProgressReporter {
             bytes_downloaded: bytes,
             bytes_expected: self.bytes_expected,
             items_unpacked: self.items_unpacked.load(Ordering::Relaxed),
+            is_computing_derived_data: false,
         });
     }
 
@@ -376,6 +386,16 @@ impl DownloadProgressReporter {
             bytes_downloaded: self.bytes_downloaded.load(Ordering::Relaxed),
             bytes_expected: self.bytes_expected,
             items_unpacked: items,
+            is_computing_derived_data: false,
+        });
+    }
+
+    fn report_indexing(&self) {
+        (self.report_fn)(DownloadProgress {
+            bytes_downloaded: self.bytes_downloaded.load(Ordering::Relaxed),
+            bytes_expected: self.bytes_expected,
+            items_unpacked: self.items_unpacked.load(Ordering::Relaxed),
+            is_computing_derived_data: true,
         });
     }
 }
@@ -389,6 +409,7 @@ pub struct DownloadProgress {
     pub bytes_expected: Option<u64>,
     /// The number of repository assets that have been unpacked so far.
     pub items_unpacked: u64,
+    pub is_computing_derived_data: bool,
 }
 
 fn content_type(response: &Response) -> Option<Cow<'static, str>> {
@@ -416,7 +437,7 @@ fn content_type(response: &Response) -> Option<Cow<'static, str>> {
 
 #[derive(Debug, From, EnumDiscriminants)]
 #[strum_discriminants(name(RepoAssetVariant))]
-enum RepoAsset {
+pub enum RepoAsset {
     Builds(Vec<Build>),
     Release(Box<JsonModule>),
     DownloadCounts(HashMap<String, i32>),
@@ -437,19 +458,19 @@ impl RepoAssetVariant {
     }
 }
 
-struct RepoAssetBuf {
-    path: PathBuf,
-    variant: RepoAssetVariant,
-    data: Box<[u8]>,
+pub struct RepoAssetBuf {
+    pub path: PathBuf,
+    pub variant: RepoAssetVariant,
+    pub data: Box<[u8]>,
 }
 
-trait RepoUnpacker<'a> {
+pub trait RepoUnpacker<'a> {
     /// Returns a stream of items in the repository as they are downloaded.
     fn asset_stream(self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>>;
 }
 
 /// Unpacks a gzipped tar archive of a repository.
-struct TarGzUnpacker<R: AsyncBufRead + Unpin> {
+pub struct TarGzUnpacker<R: AsyncBufRead + Unpin> {
     archive: Archive<GzipDecoder<R>>,
 }
 
@@ -485,5 +506,54 @@ impl<'a, R: AsyncBufRead + Unpin + Send + 'a> RepoUnpacker<'a> for TarGzUnpacker
                 Ok(Some(asset))
             })
             .boxed())
+    }
+}
+
+/// Reads a directory containing assets from the file system.
+pub struct DirUnpacker {
+    path: PathBuf,
+    reader: ReadDir,
+}
+
+impl DirUnpacker {
+    pub async fn new(path: PathBuf) -> Result<Self, Error> {
+        Ok(Self {
+            reader: read_dir(&path).await?,
+            path,
+        })
+    }
+}
+
+impl<'a> RepoUnpacker<'a> for DirUnpacker {
+    fn asset_stream(self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>> {
+        let base_path = Arc::new(self.path);
+
+        let read_stream = try_unfold(self.reader, |mut dir| async move {
+            if let Some(entry) = dir.next_entry().await? {
+                Ok::<_, Error>(Some((entry, dir)))
+            } else {
+                Ok(None)
+            }
+        })
+        .try_filter_map(move |item| {
+            let base_path = base_path.clone();
+            async move {
+                let path = item.path();
+                let Some(variant) = RepoAssetVariant::from_path(&path) else {
+                    return Ok(None);
+                };
+
+                let asset = RepoAssetBuf {
+                    variant,
+                    data: read(&path).await?.into(),
+                    path: path.strip_prefix(&*base_path).unwrap().to_owned(),
+                };
+
+                Ok(Some(asset))
+            }
+        })
+        .boxed();
+
+        Ok(read_stream)
     }
 }

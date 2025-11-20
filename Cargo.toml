@@ -1,3 +1,6 @@
 [workspace]
 members = ["packages/*"]
 resolver = "3"
+
+[profile.bench]
+debug = true

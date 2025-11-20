@@ -26,6 +26,7 @@ CREATE TABLE module_releases (
     version TEXT NOT NULL,
 
     sort_index INTEGER NOT NULL DEFAULT 0,
+    up_to_date INTEGER NOT NULL DEFAULT FALSE,
     summary TEXT NOT NULL, -- aka abstract
     -- authors BLOB NOT NULL, -- string[]
     metadata BLOB NOT NULL,
@@ -151,3 +152,5 @@ CREATE TABLE repository_refs (
     priority INTEGER NOT NULL,
     PRIMARY KEY (referrer_id, name)
 );
+
+CREATE INDEX idx_repository_refs_referrer_id ON repository_refs(referrer_id);

@@ -8,7 +8,7 @@ use diesel::{
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::database::{RepoId, JsonbValue, schema::*};
+use crate::database::{JsonbValue, RepoId, schema::*};
 
 type All = Select<repositories::table, AsSelect<Repository, Sqlite>>;
 
@@ -26,6 +26,14 @@ pub struct Repository {
 impl Repository {
     pub fn all() -> All {
         repositories::table.select(Self::as_select())
+    }
+
+    pub fn as_ref(&self) -> RepositoryRef<'_> {
+        RepositoryRef {
+            name: Cow::Borrowed(&self.name),
+            url: Cow::Borrowed(&self.url),
+            priority: self.priority,
+        }
     }
 }
 

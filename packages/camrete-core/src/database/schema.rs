@@ -1,4 +1,4 @@
-use diesel::{table, joinable, allow_tables_to_appear_in_same_query};
+use diesel::{allow_tables_to_appear_in_same_query, joinable, table};
 
 table! {
     builds (build_id) {
@@ -66,6 +66,7 @@ table! {
         release_id -> Integer,
         module_id -> Integer,
         version -> Text,
+        up_to_date -> Bool,
         sort_index -> Integer,
         summary -> Text,
         metadata -> Binary,

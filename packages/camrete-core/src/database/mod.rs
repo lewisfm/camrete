@@ -19,6 +19,7 @@ use diesel::{
     replace_into,
     serialize::{Output, ToSql},
     sql_types::Integer,
+    update,
     upsert::excluded,
 };
 use reqwest::header::HeaderValue;
@@ -33,7 +34,7 @@ use crate::{
             Build, NewModule, NewRelease, ReleaseMetadata, Repository, RepositoryRef,
             module::{
                 NewModuleAuthor, NewModuleLocale, NewModuleRelationship,
-                NewModuleRelationshipGroup, NewModuleTag,
+                NewModuleRelationshipGroup, NewModuleTag, SortableRelease,
             },
         },
         schema::*,
@@ -96,7 +97,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
     /// Create a new repository with the given name. Any previous repository
     /// with the same name will be overwritten.
     #[instrument(skip_all)]
-    pub fn create_empty_repo(&mut self, new_repo: RepositoryRef<'_>) -> QueryResult<RepoId> {
+    pub fn create_empty_repo(&mut self, new_repo: RepositoryRef<'_>) -> QueryResult<Repository> {
         use schema::repositories::dsl::*;
 
         info!(
@@ -107,8 +108,8 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
 
         let id = replace_into(repositories)
             .values(new_repo)
-            .returning(repo_id)
-            .get_result::<RepoId>(&mut *self.connection)?;
+            .returning(Repository::as_returning())
+            .get_result(&mut *self.connection)?;
 
         Ok(id)
     }
@@ -138,7 +139,11 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
 
     /// Add a release to an existing module.
     #[instrument(skip_all)]
-    pub fn create_release(&mut self, json: &JsonModule, repo_id: RepoId) -> QueryResult<ReleaseId> {
+    pub fn create_release(
+        &mut self,
+        json: &JsonModule,
+        repo_id: RepoId,
+    ) -> QueryResult<(ModuleId, ReleaseId)> {
         debug!(
             mod_name = ?json.name,
             version = ?json.version,
@@ -267,7 +272,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
                 .execute(&mut *self.connection)?;
         }
 
-        Ok(release_id)
+        Ok((module_id, release_id))
     }
 
     /// Add the given builds to the build-id/version map.
@@ -344,6 +349,35 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         replace_into(etags)
             .values((url.eq(encoded_url), etag.eq(etag_str)))
             .execute(&mut *self.connection)?;
+
+        Ok(())
+    }
+
+    /// Update the sort order of the module.
+    #[instrument(skip(self))]
+    pub fn update_derived_module_data(&mut self, mod_id: ModuleId) -> QueryResult<()> {
+        debug!("Recomputing derived module data");
+
+        let mut releases = SortableRelease::all()
+            .filter(SortableRelease::with_parent(mod_id))
+            .get_results(&mut *self.connection)?;
+
+        releases.sort_unstable_by(|l, r| l.version.cmp(&r.version));
+
+        trace!(num_releases = %releases.len());
+
+        let mut is_most_recent = true;
+        for (ordinal, release) in releases.into_iter().enumerate().rev() {
+            update(module_releases::table)
+                .filter(module_releases::release_id.eq(release.release_id))
+                .set((
+                    module_releases::sort_index.eq(ordinal as i32),
+                    module_releases::up_to_date.eq(is_most_recent),
+                ))
+                .execute(&mut *self.connection)?;
+
+            is_most_recent = false;
+        }
 
         Ok(())
     }
