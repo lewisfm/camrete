@@ -26,7 +26,7 @@ where
     })
 }
 
-pub fn serialize<'a, T, S>(value: &[T], s: S) -> Result<S::Ok, S::Error>
+pub fn serialize<T, S>(value: &[T], s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
     T: Serialize,
@@ -49,8 +49,6 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::marker::PhantomData;
-
     use serde::{Deserialize, Serialize};
     use serde_test::{assert_tokens, Token};
 

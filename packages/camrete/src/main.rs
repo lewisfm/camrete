@@ -1,22 +1,13 @@
 use std::{
     env::args,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock}, time::Duration,
 };
 
-use camrete_core::repo::client::RepoClient;
+use camrete_core::{database::models::RepositoryRef, repo::client::RepoManager};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
-use miette::Diagnostic;
-use thiserror::Error;
 use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 use url::Url;
-
-#[derive(Debug, Error, Diagnostic)]
-enum CliError {
-    #[error("Failed to parse URL\n{0}")]
-    #[diagnostic(code(camrete::cli::invalid_url))]
-    InvalidUrl(String),
-}
 
 #[derive(Debug, clap::Parser)]
 struct Args {
@@ -33,25 +24,32 @@ async fn main() -> miette::Result<()> {
 
     let args = Args::parse();
 
-    let mut repo_client = RepoClient::new("../../development.db")?;
+    let mut repo_client = RepoManager::new("development.db")?;
 
     let bar = Arc::new(ProgressBar::no_length().with_style(PROGRESS_STYLE_MSG.clone()));
+    bar.enable_steady_tick(Duration::from_millis(100));
+
+    let repo = RepositoryRef::new("KSP-default", &args.url);
 
     repo_client
-        .download("KSP-default", args.url, {
+        .download(repo, {
             let bar = bar.clone();
-            move |p| {
+            Box::new(move |p| {
                 if let Some(bytes_expected) = p.bytes_expected {
                     bar.set_length(bytes_expected);
                 }
 
                 bar.set_position(p.bytes_downloaded);
-                bar.set_message(format!("{} items unpacked", p.items_unpacked));
-            }
+                if p.is_committing {
+                    bar.set_message("Committing changes...");
+                } else {
+                    bar.set_message(format!("{} items unpacked", p.items_unpacked));
+                }
+            })
         })
         .await?;
 
-    bar.finish();
+    bar.finish_with_message("Done");
 
     Ok(())
 }

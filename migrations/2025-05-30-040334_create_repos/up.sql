@@ -1,7 +1,7 @@
 CREATE TABLE repositories (
     repo_id INTEGER PRIMARY KEY NOT NULL,
-    url BLOB UNIQUE NOT NULL,
-    name TEXT NOT NULL,
+    name TEXT UNIQUE NOT NULL,
+    url BLOB NOT NULL,
     priority INTEGER NOT NULL,
     x_mirror BOOLEAN NOT NULL,
     x_comment TEXT
@@ -143,15 +143,15 @@ CREATE TABLE builds (
 
 CREATE TABLE etags (
     url BLOB PRIMARY KEY NOT NULL,
-    etag TEXT NOT NULL
+    etag TEXT
 );
 
 CREATE TABLE repository_refs (
-    referrer_repo_url BLOB NOT NULL REFERENCES repositories(url) ON DELETE CASCADE,
+    referrer_id BLOB NOT NULL REFERENCES repositories(repo_id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     url BLOB NOT NULL,
     priority INTEGER NOT NULL,
     x_mirror INTEGER NOT NULL,
     x_comment TEXT,
-    PRIMARY KEY (referrer_repo_url, url)
+    PRIMARY KEY (referrer_id, name)
 );

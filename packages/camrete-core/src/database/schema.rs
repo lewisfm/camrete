@@ -10,7 +10,7 @@ table! {
 table! {
     etags (url) {
         url -> Binary,
-        etag -> Text,
+        etag -> Nullable<Text>,
     }
 }
 
@@ -121,12 +121,12 @@ table! {
 }
 
 table! {
-    repository_refs (referrer_repo_url, url) {
-        referrer_repo_url -> Binary,
+    repository_refs (referrer_id, url) {
+        referrer_id -> Integer,
         name -> Text,
         url -> Binary,
         priority -> Integer,
-        x_mirror -> Integer,
+        x_mirror -> Bool,
         x_comment -> Nullable<Text>,
     }
 }

@@ -9,6 +9,7 @@ async-compression = { version = "0.4.33", features = ["tokio", "gzip"] }
 bytes = "1.11.0"
 derive_more = { version = "2.0.1", features = ["deref", "from", "into", "try_from"] }
 diesel = { version = "2.3.3", features = ["sqlite", "returning_clauses_for_sqlite_3_35", "r2d2", "serde_json", "time"] }
+diesel_migrations = { version = "2.3.0", features = ["sqlite"] }
 directories = "6.0.0"
 futures-core = "0.3.31"
 futures-util = { version = "0.3.31", features = ["io"] }

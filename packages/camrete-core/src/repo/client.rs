@@ -5,7 +5,7 @@ use std::{
     pin::Pin,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     task::{Context, Poll},
 };
@@ -15,21 +15,24 @@ use bytes::Bytes;
 use derive_more::From;
 use diesel::{
     connection::SimpleConnection,
-    insert_into,
+    debug_query, insert_into,
     prelude::*,
     r2d2::{ConnectionManager, Pool},
+    sqlite::Sqlite,
 };
-use futures_core::Stream;
+use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
+use futures_core::{Stream, stream::BoxStream};
 use futures_util::{StreamExt, TryStreamExt};
 use miette::Diagnostic;
 use reqwest::{
     Response,
-    header::{ACCEPT, CONTENT_TYPE},
+    header::{ACCEPT, CONTENT_TYPE, ETAG, HeaderValue},
 };
 use strum::EnumDiscriminants;
 use tokio::{
     io::{self, AsyncBufRead, AsyncReadExt},
     spawn,
+    task::JoinSet,
 };
 use tokio_tar::Archive;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
@@ -38,11 +41,14 @@ use url::Url;
 
 use crate::{
     DIRS, DbPool, Error, Result, USER_AGENT,
+    database::{
+        ModuleId, RepoDB, RepoId,
+        models::{Build, NewModule, NewRelease, ReleaseMetadata, Repository, RepositoryRef},
+        schema::repositories,
+    },
     io::AsyncReadExt as _,
     json::{JsonBuilds, JsonError, JsonModule, RepositoryRefList},
-    models::{Build, NewModule, NewModuleRelease, ReleaseMetadata, RepositoryRef},
     repo::game::GameVersionParseError,
-    schema::repositories,
 };
 
 mod mime {
@@ -65,23 +71,29 @@ pub enum RepoUnpackError {
     #[error(
         "a JSON document in the repository was invalid\n\tdocument path: {path}\n\t(from {url})"
     )]
+    #[diagnostic(code(camrete::repo::invalid_json))]
     InvalidJsonFile {
-        #[diagnostic(transparent)]
         source: JsonError,
-        url: Box<Url>,
+        url: Arc<Url>,
         path: PathBuf,
     },
+    #[error("the online repository's ETag was not valid UTF-8")]
+    #[diagnostic(code(camrete::repo::bad_etag))]
+    InvalidEtag {
+        url: Arc<Url>,
+    }
 }
 
 const MAX_DB_CONNS: u32 = 16;
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations");
 
 #[derive(Debug, Clone)]
-pub struct RepoClient {
+pub struct RepoManager {
     database: DbPool,
     http: reqwest::Client,
 }
 
-impl RepoClient {
+impl RepoManager {
     pub async fn from_data_dir() -> Result<Self> {
         let repos_file = DIRS.data_local_dir().join("repos.sqlite");
         let url = Url::from_file_path(repos_file).expect("path is valid");
@@ -94,6 +106,7 @@ impl RepoClient {
         let pool = Pool::builder().max_size(MAX_DB_CONNS).build(manager)?;
 
         let mut conn = pool.get()?;
+
         // see https://fractaledmind.github.io/2023/09/07/enhancing-rails-sqlite-fine-tuning/
         // sleep if the database is busy, this corresponds to up to 2 seconds sleeping time.
         conn.batch_execute("PRAGMA busy_timeout = 2000;")?;
@@ -107,6 +120,11 @@ impl RepoClient {
         // free some space by truncating possibly massive WAL files from the last run
         conn.batch_execute("PRAGMA wal_checkpoint(TRUNCATE);")?;
 
+        conn.batch_execute("PRAGMA foreign_keys = ON;")?;
+
+        conn.run_pending_migrations(MIGRATIONS)
+            .map_err(Error::DbMigrations)?;
+
         Ok(Self {
             database: pool,
             http: reqwest::Client::builder()
@@ -116,38 +134,40 @@ impl RepoClient {
         })
     }
 
+    /// Downloads the given repository from an online URL, unpacks it, then inserts it into the repository database.
     #[instrument(skip(self, progress_reporter))]
     pub async fn download(
         &mut self,
-        name: &str,
-        url: Url,
-        progress_reporter: impl Fn(UnpackProgress) + Send + Sync + 'static,
+        repo: RepositoryRef<'_>,
+        progress_reporter: Box<dyn Fn(DownloadProgress) + Send + Sync>,
     ) -> Result<(), Error> {
         info!("Downloading an online CKAN repository");
 
         let response = self
             .http
-            .get(url.clone())
+            .get(repo.url.clone().into_owned())
             .header(
                 ACCEPT,
                 "application/gzip,application/x-gzip,application/zip",
             )
             .send()
-            .await?;
+            .await?
+            .error_for_status()?;
 
         let download_size = response.content_length();
+        let new_etag = response.headers().get(ETAG).cloned();
 
-        let content_type = content_type(&response)
-            .ok_or_else(|| RepoUnpackError::MissingContentType { url: url.clone() })?;
+        let content_type =
+            content_type(&response).ok_or_else(|| RepoUnpackError::MissingContentType {
+                url: repo.url.clone().into_owned(),
+            })?;
 
         trace!(%content_type);
 
-        let progress = Arc::new(ProgressReporter {
-            report_fn: progress_reporter,
-            bytes_downloaded: AtomicU64::new(0),
-            bytes_expected: download_size,
-            items_unpacked: AtomicU64::new(0),
-        });
+        let progress = Arc::new(DownloadProgressReporter::new(
+            download_size,
+            progress_reporter,
+        ));
 
         let download_stream = response
             .bytes_stream()
@@ -158,50 +178,52 @@ impl RepoClient {
                 progress.report_download_progress(bytes);
             });
 
-        let mut unpacker = match content_type.as_ref() {
+        match content_type.as_ref() {
             mime::GZIP | mime::X_GZIP => {
                 debug!("Using tar.gz unpacker");
-                TarGzUnpacker::new(download_stream).asset_stream()?.boxed()
+
+                let unpacker = TarGzUnpacker::new(download_stream);
+                self.unpack_repo(repo, unpacker, new_etag, progress.clone())
+                    .await?;
             }
             mime::ZIP => todo!("unpacking of .zip repos"),
             _ => {
                 return Err(RepoUnpackError::UnsupportedContentType {
                     content_type: content_type.to_string(),
-                    url: url.clone(),
+                    url: repo.url.clone().into_owned(),
                 }
                 .into());
             }
         };
 
-        let url = Arc::new(url);
-        // let (item_tx, item_rx) = mpsc::channel(32);
-        let mut db = self.database.get()?;
+        Ok(())
+    }
 
-        // Add our repo to database first so we can use its ID when inserting other things.
-        let new_repo = RepositoryRef::new(name, &url);
+    async fn unpack_repo(
+        &mut self,
+        repo: RepositoryRef<'_>,
+        unpacker: impl RepoUnpacker<'_>,
+        etag: Option<HeaderValue>,
+        progress: Arc<DownloadProgressReporter>,
+    ) -> Result<(), Error> {
+        // Collect all repos into a big list so we can do the DB transaction synchronously.
+        let mut asset_stream = unpacker.asset_stream()?;
+        let repo_url = Arc::new(repo.url.clone().into_owned());
 
-        let repo_id: i32 = insert_into(repositories::table)
-            .values(new_repo)
-            .on_conflict_do_nothing()
-            .returning(repositories::repo_id)
-            .get_result(&mut db)?;
-
-        while let Some(mut asset) = unpacker.try_next().await? {
+        let mut tasks = JoinSet::new();
+        while let Some(mut asset) = asset_stream.try_next().await? {
             let progress = progress.clone();
-            let repo_url = url.clone();
-            // let slot = item_tx.reserve().await.unwrap();
-            // let mut mgr = self.clone();
+            let repo_url = repo_url.clone();
 
-            spawn(async move {
-                match apply_resource(&mut asset, repo_id) {
+            tasks.spawn(async move {
+                match parse_asset(&mut asset) {
                     Ok(asset) => {
                         progress.report_unpacked_item();
-                        println!("{asset:?}");
-                        Ok(())
+                        Ok(asset)
                     }
                     Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
                         source: err,
-                        url: (*repo_url).clone().into(),
+                        url: repo_url,
                         path: asset.path,
                     })?,
                     Err(err) => Err(err),
@@ -209,49 +231,78 @@ impl RepoClient {
             });
         }
 
+        let task_results = tasks.join_all().await;
+
+        let mut db = RepoDB::new(self.database.get()?);
+
+        progress.report_committing();
+        db.transaction(|mut db| {
+            db.set_etag(repo_url.clone(), etag.as_ref())?;
+
+            let repo_id = db.create_empty_repo(repo)?;
+
+            for asset in task_results {
+                match asset? {
+                    RepoAsset::Release(parsed) => {
+                        let module_id = db.register_module(NewModule {
+                            repo_id,
+                            module_name: parsed.name.into(),
+                        })?;
+
+                        db.create_release(NewRelease {
+                            module_id,
+                            version: parsed.version,
+                            kind: parsed.kind,
+                            summary: parsed.r#abstract,
+                            metadata: ReleaseMetadata {
+                                comment: parsed.comment,
+                                download: parsed.download,
+                                download_content_type: parsed.download_content_type,
+                                download_hash: parsed.download_hash,
+                                install: parsed.install,
+                                resources: parsed.resources,
+                            },
+                            description: parsed.description,
+                            release_status: parsed.release_status,
+                            game_version: if !parsed.ksp_version.is_empty() {
+                                parsed.ksp_version.into()
+                            } else {
+                                parsed.ksp_version_min.into()
+                            },
+                            game_version_min: parsed.ksp_version_min.into(),
+                            game_version_strict: parsed.ksp_version_strict,
+                            download_size: parsed.download_size,
+                            install_size: parsed.install_size,
+                            release_date: parsed.release_date,
+                        })?;
+                    }
+                    RepoAsset::Builds(builds) => {
+                        db.register_builds(builds)?;
+                    }
+                    RepoAsset::DownloadCounts(counts) => {
+                        db.add_download_counts(repo_id, &counts)?;
+                    }
+                    RepoAsset::RepositoryRefList(ref_list) => {
+                        for new_ref in ref_list.repositories {
+                            db.add_repo_ref(repo_id, new_ref)?;
+                        }
+                    }
+                }
+            }
+
+            Ok(())
+        })?;
+
         Ok(())
     }
 }
 
-fn apply_resource(asset: &mut RepoAssetBuf, repo_id: i32) -> Result<RepoAsset> {
+fn parse_asset(asset: &mut RepoAssetBuf) -> Result<RepoAsset> {
     match asset.variant {
         RepoAssetVariant::Release => {
-            let parsed: JsonModule = simd_json::from_slice(&asset.data)?;
+            let parsed: Box<JsonModule> = simd_json::from_slice(&asset.data)?;
             parsed.verify()?;
-
-            let module = NewModule {
-                repo_id,
-                module_name: parsed.name.into(),
-            };
-
-            let release = NewModuleRelease {
-                module_id: 0, // Unknown until inserted
-                version: parsed.version,
-                kind: parsed.kind,
-                summary: parsed.r#abstract,
-                metadata: ReleaseMetadata {
-                    comment: parsed.comment,
-                    download: parsed.download,
-                    download_content_type: parsed.download_content_type,
-                    download_hash: parsed.download_hash,
-                    install: parsed.install,
-                    resources: parsed.resources,
-                },
-                description: parsed.description,
-                release_status: parsed.release_status,
-                game_version: if !parsed.ksp_version.is_empty() {
-                    parsed.ksp_version.into()
-                } else {
-                    parsed.ksp_version_min.into()
-                },
-                game_version_min: parsed.ksp_version_min.into(),
-                game_version_strict: parsed.ksp_version_strict,
-                download_size: parsed.download_size,
-                install_size: parsed.install_size,
-                release_date: parsed.release_date,
-            };
-
-            Ok(RepoAsset::Release { module, release: release.into() })
+            Ok(RepoAsset::Release(parsed))
         }
         RepoAssetVariant::DownloadCounts => {
             let map = simd_json::from_slice(&asset.data)?;
@@ -279,40 +330,64 @@ fn apply_resource(asset: &mut RepoAssetBuf, repo_id: i32) -> Result<RepoAsset> {
     }
 }
 
-struct ProgressReporter<F> {
-    report_fn: F,
+struct DownloadProgressReporter {
+    report_fn: Box<dyn Fn(DownloadProgress) + Send + Sync>,
     bytes_downloaded: AtomicU64,
     bytes_expected: Option<u64>,
     items_unpacked: AtomicU64,
 }
 
-impl<F: Fn(UnpackProgress)> ProgressReporter<F> {
+impl DownloadProgressReporter {
+    pub fn new(
+        bytes_expected: Option<u64>,
+        report_fn: Box<dyn Fn(DownloadProgress) + Send + Sync>,
+    ) -> Self {
+        Self {
+            report_fn,
+            bytes_downloaded: 0.into(),
+            bytes_expected,
+            items_unpacked: 0.into(),
+        }
+    }
+
     fn report_download_progress(&self, bytes: u64) {
         self.bytes_downloaded.store(bytes, Ordering::Relaxed);
 
-        (self.report_fn)(UnpackProgress {
+        (self.report_fn)(DownloadProgress {
             bytes_downloaded: bytes,
             bytes_expected: self.bytes_expected,
             items_unpacked: self.items_unpacked.load(Ordering::Relaxed),
+            is_committing: false,
         });
     }
 
     fn report_unpacked_item(&self) {
         let items = self.items_unpacked.fetch_add(1, Ordering::Relaxed) + 1;
 
-        (self.report_fn)(UnpackProgress {
+        (self.report_fn)(DownloadProgress {
             bytes_downloaded: self.bytes_downloaded.load(Ordering::Relaxed),
             bytes_expected: self.bytes_expected,
             items_unpacked: items,
+            is_committing: false,
+        });
+    }
+
+    fn report_committing(&self) {
+        (self.report_fn)(DownloadProgress {
+            bytes_downloaded: self.bytes_downloaded.load(Ordering::Relaxed),
+            bytes_expected: self.bytes_expected,
+            items_unpacked: self.items_unpacked.load(Ordering::Relaxed),
+            is_committing: true,
         });
     }
 }
 
 #[derive(Debug)]
-pub struct UnpackProgress {
+pub struct DownloadProgress {
     pub bytes_downloaded: u64,
     pub bytes_expected: Option<u64>,
     pub items_unpacked: u64,
+    pub is_committing: bool,
 }
 
 fn content_type(response: &Response) -> Option<Cow<'static, str>> {
@@ -342,10 +417,7 @@ fn content_type(response: &Response) -> Option<Cow<'static, str>> {
 #[strum_discriminants(name(RepoAssetVariant))]
 enum RepoAsset {
     Builds(Vec<Build>),
-    Release {
-        module: NewModule<'static>,
-        release: Box<NewModuleRelease>,
-    },
+    Release(Box<JsonModule>),
     DownloadCounts(HashMap<String, i32>),
     RepositoryRefList(RepositoryRefList),
 }
@@ -370,9 +442,9 @@ struct RepoAssetBuf {
     data: Box<[u8]>,
 }
 
-trait RepoUnpacker {
+trait RepoUnpacker<'a> {
     /// Returns a stream of items in the repository as they are downloaded.
-    fn asset_stream(self) -> Result<impl Stream<Item = Result<RepoAssetBuf>>>;
+    fn asset_stream(self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>>;
 }
 
 /// Unpacks a gzipped tar archive of a repository.
@@ -388,8 +460,8 @@ impl<R: AsyncBufRead + Unpin> TarGzUnpacker<R> {
     }
 }
 
-impl<R: AsyncBufRead + Unpin> RepoUnpacker for TarGzUnpacker<R> {
-    fn asset_stream(mut self) -> Result<impl Stream<Item = Result<RepoAssetBuf>>> {
+impl<'a, R: AsyncBufRead + Unpin + Send + 'a> RepoUnpacker<'a> for TarGzUnpacker<R> {
+    fn asset_stream(mut self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>> {
         let entries = self.archive.entries()?;
 
         Ok(entries
@@ -410,6 +482,7 @@ impl<R: AsyncBufRead + Unpin> RepoUnpacker for TarGzUnpacker<R> {
                 };
 
                 Ok(Some(asset))
-            }))
+            })
+            .boxed())
     }
 }

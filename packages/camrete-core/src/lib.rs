@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use diesel::{prelude::*, r2d2::{ConnectionManager, Pool}};
+use diesel::{prelude::*, r2d2::{ConnectionManager, Pool, PooledConnection}};
 use directories::ProjectDirs;
 use miette::Diagnostic;
 use repo::{client::RepoUnpackError};
@@ -11,14 +11,13 @@ use crate::json::JsonError;
 extern crate serde_json as simd_json;
 
 pub mod json;
-mod models;
 pub mod repo;
-mod schema;
 mod io;
+pub mod database;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-pub type DbPool = Pool<ConnectionManager<DbConnection>>;
-pub type DbConnection = SqliteConnection;
+pub type DbPool = Pool<ConnectionManager<SqliteConnection>>;
+pub type DbConnection = PooledConnection<ConnectionManager<SqliteConnection>>;
 
 pub static DIRS: LazyLock<ProjectDirs> =
     LazyLock::new(|| ProjectDirs::from("", "", "CKAN").expect("user home dir available"));
@@ -28,14 +27,18 @@ static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_V
 #[derive(Debug, Error, Diagnostic)]
 pub enum Error {
     #[error("failed to open the on-device CKAN database")]
-    #[diagnostic(code(camrete::database::open))]
+    #[diagnostic(code(camrete::database::cannot_open))]
     DbConnection(#[from] diesel::ConnectionError),
 
     #[error("failed to establish a connection pool for the on-device CKAN database")]
     DbPool(#[from] diesel::r2d2::PoolError),
 
+    #[error("failed to upgrade the on-device CKAN database")]
+    #[diagnostic(code(camrete::database::upgrade_failure))]
+    DbMigrations(Box<dyn std::error::Error + Send + Sync>),
+
     #[error("a request to the on-device CKAN database failed")]
-    #[diagnostic(code(camrete::database::request))]
+    #[diagnostic(code(camrete::database::request_failure))]
     Db(#[from] diesel::result::Error),
 
     #[error("HTTP request failed")]

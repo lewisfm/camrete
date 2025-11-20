@@ -15,7 +15,7 @@ use thiserror::Error;
 use time::{OffsetDateTime, serde::iso8601};
 use url::Url;
 
-use crate::{models::RepositoryRef, repo::game::GameVersion};
+use crate::{database::models::RepositoryRef, repo::game::GameVersion};
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum JsonError {
