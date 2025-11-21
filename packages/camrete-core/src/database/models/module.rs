@@ -16,7 +16,7 @@ use time::OffsetDateTime;
 use url::Url;
 
 use crate::{
-    database::{DepGroupId, DepId, JsonbValue, ModAuthorId, ModuleId, ReleaseId, RepoId, schema::*},
+    database::{DepGroupId, DepId, JsonbValue, ModAuthorId, ModuleId, ReleaseId, RepoId, models::Repository, schema::*},
     json::{DownloadChecksum, ModuleInstallDescriptor, ModuleKind, ModuleResources, ReleaseStatus},
     repo::game::GameVersion,
 };
@@ -31,9 +31,10 @@ type AllDepGroups =
     Select<module_relationship_groups::table, AsSelect<ModuleRelationshipGroup, Sqlite>>;
 type AllDeps = Select<module_relationships::table, AsSelect<ModuleRelationship, Sqlite>>;
 
-#[derive(Debug, Queryable, Selectable, Identifiable)]
+#[derive(Debug, Queryable, Selectable, Identifiable, Associations)]
 #[diesel(table_name = modules)]
 #[diesel(primary_key(module_id))]
+#[diesel(belongs_to(Repository, foreign_key = repo_id))]
 #[diesel(check_for_backend(Sqlite))]
 pub struct Module {
     #[diesel(column_name = module_id)]

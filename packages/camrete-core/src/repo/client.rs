@@ -278,7 +278,7 @@ impl RepoManager {
             // Remove any previous modules so that we are only left with the ones currently
             // included in the repo.
             delete(modules::table)
-                .filter(modules::repo_id.eq(repo.repo_id))
+                .filter(modules::repo_id.eq(repo.id))
                 .execute(db.connection)?;
 
             let mut updated_mods = HashMap::new();
@@ -289,7 +289,7 @@ impl RepoManager {
                         let existing_mod_id = updated_mods.get(&json.name).cloned();
 
                         let (mod_id, _) = db
-                            .create_release(&json, repo.repo_id, existing_mod_id)
+                            .create_release(&json, repo.id, existing_mod_id)
                             .map_err(|source| RepoUnpackError::InsertRelease {
                             name: json.name.clone(),
                             version: json.version.clone(),
@@ -303,12 +303,12 @@ impl RepoManager {
                             .map_err(RepoUnpackError::InsertBuilds)?;
                     }
                     RepoAsset::DownloadCounts(counts) => {
-                        db.add_download_counts(repo.repo_id, &counts)
+                        db.add_download_counts(repo.id, &counts)
                             .map_err(RepoUnpackError::InsertDownloadCounts)?;
                     }
                     RepoAsset::RepositoryRefList(ref_list) => {
                         for new_ref in ref_list.repositories {
-                            db.add_repo_ref(repo.repo_id, new_ref.clone())
+                            db.add_repo_ref(repo.id, new_ref.clone())
                                 .map_err(|source| RepoUnpackError::InsertRepoRefs {
                                     source,
                                     name: new_ref.name.into_owned(),
@@ -446,7 +446,9 @@ fn content_type(response: &Response) -> Option<Cow<'static, str>> {
 mod test {
     use std::sync::Mutex;
 
-    use crate::repo::asset_stream::test::load_test_repo;
+    use serde_json::{from_value, json};
+
+    use crate::{database::models::ModuleRelease, repo::asset_stream::test::load_test_repo};
 
     use super::*;
 
@@ -499,5 +501,43 @@ mod test {
         };
 
         assert_eq!(release.name, "4kSP_Expanded");
+    }
+
+    #[test]
+    fn module_versions_smart_cmp() {
+        let mgr = RepoManager::new(":memory:").unwrap();
+        let mut db = mgr.db().unwrap();
+
+        let repo = db.all_repos(true).unwrap().remove(0);
+
+        let mod1 = from_value(json!({
+            "spec_version": 1,
+            "name": "Parallax",
+            "identifier": "Parallax",
+            "version": "1.15",
+            "abstract": "A mod",
+            "author": "Linx",
+        })).unwrap();
+
+        let mod2 = from_value(json!({
+            "spec_version": 1,
+            "name": "Parallax",
+            "identifier": "Parallax",
+            "version": "1.3",
+            "abstract": "A mod",
+            "author": "Linx",
+        })).unwrap();
+
+        let (mid, _) = db.create_release(&mod1, repo.id, None).unwrap();
+        db.create_release(&mod2, repo.id, Some(mid)).unwrap();
+
+        let releases: Vec<ModuleRelease> = ModuleRelease::all()
+            .order(ModuleRelease::by_version())
+            .load(db.as_mut())
+            .unwrap();
+
+        assert_eq!(releases[0].module_id, mid);
+        assert_eq!(releases[0].display_name, "Parallax");
+        assert_eq!(releases[0].version, "1.15");
     }
 }

@@ -49,15 +49,18 @@ pub struct JsonModule {
     pub name: String,
     pub identifier: String,
     pub version: String,
+    pub r#abstract: String,
+    #[serde(with = "one_or_many")]
+    pub author: Vec<String>,
+
     #[serde(default)]
     pub kind: ModuleKind,
-    pub r#abstract: String,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub release_status: ReleaseStatus,
+    #[serde(default)]
     pub comment: Option<String>,
-    #[serde(with = "one_or_many")]
-    pub author: Vec<String>,
     #[serde(with = "one_or_many")]
     #[serde(default)]
     pub download: Vec<Url>,

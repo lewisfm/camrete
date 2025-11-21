@@ -12,11 +12,13 @@ use crate::database::{JsonbValue, RepoId, schema::*};
 
 type All = Select<repositories::table, AsSelect<Repository, Sqlite>>;
 
-#[derive(Debug, Queryable, Selectable)]
+#[derive(Debug, Queryable, Selectable, Identifiable)]
 #[diesel(table_name = repositories)]
+#[diesel(primary_key(repo_id))]
 #[diesel(check_for_backend(Sqlite))]
 pub struct Repository {
-    pub repo_id: RepoId,
+    #[diesel(column_name = repo_id)]
+    pub id: RepoId,
     pub name: String,
     #[diesel(deserialize_as = JsonbValue)]
     pub url: Url,
