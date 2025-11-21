@@ -81,7 +81,7 @@ where
 
 mod id {
     macro_rules! tag {
-        ($($name:ident),*) => {
+        ($($name:ident),*$(,)?) => {
             $(
             #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub struct $name;
@@ -89,7 +89,17 @@ mod id {
         };
     }
 
-    tag!(Repo, Module, Release, RelationshipGroup, Relationship);
+    tag!(
+        Repo,
+        Module,
+        Release,
+        RelationshipGroup,
+        Relationship,
+        ModAuthor,
+        ModLicense,
+        ModLocale,
+        ModTag,
+    );
 }
 
 pub type RepoId = Id<id::Repo>;
@@ -97,6 +107,10 @@ pub type ModuleId = Id<id::Module>;
 pub type ReleaseId = Id<id::Release>;
 pub type DepGroupId = Id<id::RelationshipGroup>;
 pub type DepId = Id<id::Relationship>;
+pub type ModAuthorId = Id<id::ModAuthor>;
+pub type ModLicenseId = Id<id::ModLicense>;
+pub type ModLocaleId = Id<id::ModLocale>;
+pub type ModTagId = Id<id::ModTag>;
 
 #[derive(Debug, FromSqlRow, AsExpression)]
 #[diesel(sql_type = Binary)]

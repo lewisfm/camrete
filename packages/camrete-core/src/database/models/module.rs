@@ -16,7 +16,7 @@ use time::OffsetDateTime;
 use url::Url;
 
 use crate::{
-    database::{DepGroupId, DepId, JsonbValue, ModuleId, ReleaseId, RepoId, schema::*},
+    database::{DepGroupId, DepId, JsonbValue, ModAuthorId, ModuleId, ReleaseId, RepoId, schema::*},
     json::{DownloadChecksum, ModuleInstallDescriptor, ModuleKind, ModuleResources, ReleaseStatus},
     repo::game::GameVersion,
 };
@@ -31,8 +31,9 @@ type AllDepGroups =
     Select<module_relationship_groups::table, AsSelect<ModuleRelationshipGroup, Sqlite>>;
 type AllDeps = Select<module_relationships::table, AsSelect<ModuleRelationship, Sqlite>>;
 
-#[derive(Debug, Queryable, Selectable)]
+#[derive(Debug, Queryable, Selectable, Identifiable)]
 #[diesel(table_name = modules)]
+#[diesel(primary_key(module_id))]
 #[diesel(check_for_backend(Sqlite))]
 pub struct Module {
     #[diesel(column_name = module_id)]
@@ -93,8 +94,10 @@ pub struct NewRelease<'a> {
     pub release_date: Option<OffsetDateTime>,
 }
 
-#[derive(Debug, Queryable, Selectable)]
+#[derive(Debug, Queryable, Selectable, Identifiable, Associations)]
 #[diesel(table_name = module_releases)]
+#[diesel(primary_key(release_id))]
+#[diesel(belongs_to(Module))]
 #[diesel(check_for_backend(Sqlite))]
 pub struct ModuleRelease {
     #[diesel(column_name = release_id)]
@@ -176,6 +179,23 @@ pub struct NewModuleAuthor<'a> {
     pub author: &'a str,
 }
 
+#[derive(Debug, Insertable, Identifiable, Associations)]
+#[diesel(table_name = module_authors)]
+#[diesel(belongs_to(ModuleRelease, foreign_key = release_id))]
+#[diesel(check_for_backend(Sqlite))]
+pub struct ModuleAuthor {
+    pub id: ModAuthorId,
+    pub author: String,
+    pub release_id: ReleaseId,
+}
+
+impl ModuleAuthor {
+    #[dsl::auto_type(no_type_alias)]
+    pub fn by_ordinal() -> _ {
+        module_authors::ordinal
+    }
+}
+
 #[derive(Debug, Insertable)]
 #[diesel(table_name = module_licenses)]
 #[diesel(check_for_backend(Sqlite))]
@@ -212,8 +232,10 @@ pub struct NewModuleRelationshipGroup<'a> {
     pub suppress_recommendations: bool,
 }
 
-#[derive(Debug, Queryable, Selectable)]
+#[derive(Debug, Queryable, Selectable, Identifiable, Associations)]
 #[diesel(table_name = module_relationship_groups)]
+#[diesel(primary_key(group_id))]
+#[diesel(belongs_to(ModuleRelease, foreign_key = release_id))]
 #[diesel(check_for_backend(Sqlite))]
 pub struct ModuleRelationshipGroup {
     #[diesel(column_name = group_id)]
@@ -286,8 +308,10 @@ pub struct NewModuleRelationship<'a> {
     pub target_version_min: Option<&'a str>,
 }
 
-#[derive(Debug, Queryable, Selectable)]
+#[derive(Debug, Queryable, Selectable, Identifiable, Associations)]
 #[diesel(table_name = module_relationships)]
+#[diesel(primary_key(relationship_id))]
+#[diesel(belongs_to(ModuleRelationshipGroup, foreign_key = group_id))]
 #[diesel(check_for_backend(Sqlite))]
 pub struct ModuleRelationship {
     #[diesel(column_name = relationship_id)]
