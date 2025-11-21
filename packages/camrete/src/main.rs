@@ -93,8 +93,8 @@ async fn update(repo_mgr: &mut RepoManager) -> camrete_core::Result<()> {
                 let unpack_bar = unpack_bar.clone();
 
                 Box::new(move |p| {
-                    if p.is_computing_derived_data {
-                        unpack_bar.set_message("Rebuilding derived data...");
+                    if p.items_unpacked == 0 {
+                        unpack_bar.set_message("Purging outdated modules...");
                     } else {
                         unpack_bar.set_message(format!("{} items unpacked", p.items_unpacked));
                     }

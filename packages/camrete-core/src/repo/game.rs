@@ -87,7 +87,7 @@ impl Default for GameVersion {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum GameVersionParseError {
     #[error("Too many identifiers in game version")]
     TooManyParts,
@@ -131,5 +131,72 @@ impl Debug for GameVersion {
             .join(".");
 
         write!(f, "v{string}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use crate::repo::game::{GameVersion, GameVersionParseError};
+
+    #[test]
+    fn parse_any() {
+        let v1 = GameVersion::from_str("any").unwrap();
+        assert!(v1.is_empty());
+    }
+
+    #[test]
+    fn not_parse_word() {
+        let v1 = GameVersion::from_str("any version");
+        assert!(matches!(v1, Err(GameVersionParseError::NotInteger(_))));
+
+        let v2 = GameVersion::from_str("foobar");
+        assert!(matches!(v2, Err(GameVersionParseError::NotInteger(_))));
+    }
+
+    #[test]
+    fn parse_major_only() {
+        let v1 = GameVersion::from_str("5").unwrap();
+        assert_eq!(v1.major(), Some(5));
+        assert_eq!(v1.minor(), None);
+        assert_eq!(v1.patch(), None);
+    }
+
+    #[test]
+    fn parse_major_minor() {
+        let v1 = GameVersion::from_str("1.8").unwrap();
+        assert_eq!(v1.major(), Some(1));
+        assert_eq!(v1.minor(), Some(8));
+        assert_eq!(v1.patch(), None);
+    }
+
+    #[test]
+    fn parse_std() {
+        let v1 = GameVersion::from_str("3.14.15").unwrap();
+        assert_eq!(v1.major(), Some(3));
+        assert_eq!(v1.minor(), Some(14));
+        assert_eq!(v1.patch(), Some(15));
+    }
+
+    #[test]
+    fn parse_build() {
+        let v1 = GameVersion::from_str("0.0.0.15").unwrap();
+        assert_eq!(v1.major(), Some(0));
+        assert_eq!(v1.minor(), Some(0));
+        assert_eq!(v1.patch(), Some(0));
+        assert_eq!(v1.build(), Some(15));
+    }
+
+    #[test]
+    fn not_parse_too_many() {
+        let v1 = GameVersion::from_str("1.2.3.4.5");
+        assert_eq!(v1, Err(GameVersionParseError::TooManyParts));
+    }
+
+    #[test]
+    fn not_parse_letters() {
+        let v1 = GameVersion::from_str("1.2.3b");
+        assert!(matches!(v1, Err(GameVersionParseError::NotInteger(_))));
     }
 }

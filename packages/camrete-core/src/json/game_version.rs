@@ -1,3 +1,13 @@
+//! Serialize and deserialize game versions as strings.
+//!
+//! This module contains a wrapper for GameVersion which serializes and deserializes
+//! to a string instead of an encoded struct, for inclusion in JSON dumps of releases.
+//!
+//! Game versions are (de)serialized in the format `1[.2][.3][.4]`, in order from major
+//! to build version numbers. Empty game versions are serialized as nulls.
+//!
+//! When deserializing, a string with the value "any" is parsed the same as a null.
+
 use std::{
     fmt::{self, Formatter, Write},
     str::FromStr,
@@ -11,6 +21,7 @@ use serde::{
 
 use crate::repo::game::GameVersion;
 
+/// A wrapper for GameVersion which serializes as a string.
 #[derive(Debug, Copy, Clone, Deref, From, Into, PartialEq, Eq, Default)]
 pub struct MetaGameVersion(pub GameVersion);
 

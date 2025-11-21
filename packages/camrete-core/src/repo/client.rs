@@ -256,7 +256,9 @@ impl RepoManager {
                             }
                             .into()),
                             other => other,
-                        }).await.unwrap();
+                        })
+                        .await
+                        .unwrap();
                     });
                 }
 
@@ -383,17 +385,18 @@ impl DownloadProgressReporter {
         }
     }
 
-    fn report_download_progress(&self, bytes: u64) {
-        self.bytes_downloaded.store(bytes, Ordering::Relaxed);
+    /// Reports that the given number of bytes have been read since the beginning of the download.
+    fn report_download_progress(&self, total_bytes: u64) {
+        self.bytes_downloaded.store(total_bytes, Ordering::Relaxed);
 
         (self.report_fn)(DownloadProgress {
-            bytes_downloaded: bytes,
+            bytes_downloaded: total_bytes,
             bytes_expected: self.bytes_expected,
             items_unpacked: self.items_unpacked.load(Ordering::Relaxed),
-            is_computing_derived_data: false,
         });
     }
 
+    /// Reports that an item has been unpacked.
     fn report_unpacked_item(&self) {
         let items = self.items_unpacked.fetch_add(1, Ordering::Relaxed) + 1;
 
@@ -401,22 +404,12 @@ impl DownloadProgressReporter {
             bytes_downloaded: self.bytes_downloaded.load(Ordering::Relaxed),
             bytes_expected: self.bytes_expected,
             items_unpacked: items,
-            is_computing_derived_data: false,
         });
     }
-
-    // fn report_indexing(&self) {
-    //     (self.report_fn)(DownloadProgress {
-    //         bytes_downloaded: self.bytes_downloaded.load(Ordering::Relaxed),
-    //         bytes_expected: self.bytes_expected,
-    //         items_unpacked: self.items_unpacked.load(Ordering::Relaxed),
-    //         is_computing_derived_data: true,
-    //     });
-    // }
 }
 
 /// A snapshot of the progress of a repository download.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct DownloadProgress {
     /// The number of bytes that have been downloaded.
     pub bytes_downloaded: u64,
@@ -424,7 +417,6 @@ pub struct DownloadProgress {
     pub bytes_expected: Option<u64>,
     /// The number of repository assets that have been unpacked so far.
     pub items_unpacked: u64,
-    pub is_computing_derived_data: bool,
 }
 
 fn content_type(response: &Response) -> Option<Cow<'static, str>> {
@@ -448,4 +440,64 @@ fn content_type(response: &Response) -> Option<Cow<'static, str>> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Mutex;
+
+    use crate::repo::asset_stream::test::load_test_repo;
+
+    use super::*;
+
+    #[test]
+    fn report_progress() {
+        let mut latest_report = Arc::new(Mutex::new(None));
+
+        let reporter = DownloadProgressReporter::new(None, {
+            let latest_report = latest_report.clone();
+            Box::new(move |report| {
+                *latest_report.lock().unwrap() = Some(report);
+            })
+        });
+
+        reporter.report_download_progress(100);
+        reporter.report_download_progress(200);
+        reporter.report_download_progress(300);
+        reporter.report_unpacked_item();
+        reporter.report_unpacked_item();
+
+        drop(reporter);
+
+        let report = Arc::get_mut(&mut latest_report).unwrap();
+        let report = report.get_mut().unwrap();
+
+        assert_eq!(
+            *report,
+            Some(DownloadProgress {
+                bytes_downloaded: 300, // last call, not sum
+                bytes_expected: None,
+                items_unpacked: 2,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_module() {
+        let mut assets = load_test_repo().await;
+        assets.sort_by(|l, r| l.path.cmp(&r.path));
+
+        let release_asset = assets
+            .iter()
+            .find(|a| a.variant == RepoAssetVariant::Release)
+            .unwrap();
+
+        let parsed = parse_asset(release_asset).unwrap();
+
+        let RepoAsset::Release(release) = &parsed else {
+            panic!("Wrong asset type: {parsed:?}");
+        };
+
+        assert_eq!(release.name, "4kSP_Expanded");
+    }
 }

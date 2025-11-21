@@ -1,4 +1,4 @@
-use std::{borrow::Cow, hint::black_box, ops::DerefMut, sync::Arc};
+use std::{borrow::Cow, ops::DerefMut, sync::Arc};
 
 use derive_more::From;
 use diesel::{insert_into, prelude::*, replace_into, upsert::excluded};
@@ -133,10 +133,6 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
             version = ?json.version,
             "Creating release"
         );
-
-        if json.identifier == "Parallax" { // dbg
-            black_box(());
-        }
 
         let module_id = if let Some(id) = module_id {
             id
