@@ -256,21 +256,22 @@ impl RepoManager {
                 .filter(modules::repo_id.eq(repo.repo_id))
                 .execute(db.connection)?;
 
-            let mut updated_mods = HashSet::new();
+            let mut updated_mods = HashMap::new();
 
             while let Some(asset) = tasks.join_next().await {
                 match asset.unwrap()? {
                     RepoAsset::Release(json) => {
-                        let (mod_id, _) =
-                            db.create_release(&json, repo.repo_id).map_err(|source| {
-                                RepoUnpackError::InsertRelease {
-                                    name: json.name,
-                                    version: json.version,
-                                    source,
-                                }
+                        let existing_mod_id = updated_mods.get(&json.name).cloned();
+
+                        let (mod_id, _) = db
+                            .create_release(&json, repo.repo_id, existing_mod_id)
+                            .map_err(|source| RepoUnpackError::InsertRelease {
+                                name: json.name.clone(),
+                                version: json.version.clone(),
+                                source,
                             })?;
 
-                        updated_mods.insert(mod_id);
+                        updated_mods.insert(json.name, mod_id);
                     }
                     RepoAsset::Builds(builds) => {
                         db.register_builds(builds)
@@ -296,7 +297,7 @@ impl RepoManager {
             }
 
             progress.report_indexing();
-            for mod_id in updated_mods {
+            for mod_id in updated_mods.values().cloned() {
                 db.update_derived_module_data(mod_id)?;
             }
 

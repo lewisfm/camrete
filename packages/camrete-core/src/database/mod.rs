@@ -117,12 +117,16 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         Ok(id)
     }
 
-    /// Add a release to an existing module.
+    /// Registers a release for either a new or pre-existing module
+    /// (in which case, the module id can be provided.)
+    ///
+    /// The caller must ensure the `module_id` is correct for the given release.
     #[instrument(skip_all)]
     pub fn create_release(
         &mut self,
         json: &JsonModule,
         repo_id: RepoId,
+        module_id: Option<ModuleId>,
     ) -> QueryResult<(ModuleId, ReleaseId)> {
         debug!(
             mod_name = ?json.name,
@@ -130,10 +134,14 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
             "Creating release"
         );
 
-        let module_id = self.register_module(NewModule {
-            repo_id,
-            module_name: &json.name,
-        })?;
+        let module_id = if let Some(id) = module_id {
+            id
+        } else {
+            self.register_module(NewModule {
+                repo_id,
+                module_name: &json.name,
+            })?
+        };
 
         let metadata = ReleaseMetadata {
             comment: json.comment.as_deref().map(Cow::Borrowed),
