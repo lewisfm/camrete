@@ -175,7 +175,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         // These aren't included in the encoded metadata so they can be easily searched.
 
         let tags = json
-            .localizations
+            .tags
             .iter()
             .enumerate()
             .map(|(ordinal, tag)| NewModuleTag {
@@ -190,7 +190,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
             .execute(&mut *self.connection)?;
 
         let authors = json
-            .localizations
+            .author
             .iter()
             .enumerate()
             .map(|(ordinal, author)| NewModuleAuthor {
@@ -282,18 +282,22 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         let counts = counts.into_iter();
         debug!(num_counts = %counts.len(), "Adding download counts to modules");
 
-        for (mod_name, count) in counts {
-            insert_into(modules)
-                .values((
+        let rows = counts
+            .map(|(name, count)| {
+                (
                     repo_id.eq(repo),
-                    module_name.eq(mod_name),
+                    module_name.eq(name),
                     download_count.eq(count),
-                ))
-                .on_conflict((repo_id, module_name))
-                .do_update()
-                .set(download_count.eq(count))
-                .execute(&mut *self.connection)?;
-        }
+                )
+            })
+            .collect::<Vec<_>>();
+
+        insert_into(modules)
+            .values(rows)
+            .on_conflict((repo_id, module_name))
+            .do_update()
+            .set(download_count.eq(excluded(download_count)))
+            .execute(&mut *self.connection)?;
 
         Ok(())
     }
