@@ -13,6 +13,7 @@ use diesel::{
     sql_types::{Binary, Integer, Jsonb, Nullable},
 };
 use serde_json::{Value, from_value, to_value};
+use thiserror::Error;
 use url::Url;
 
 use crate::{database::models, repo::game::GameVersion};
@@ -88,13 +89,14 @@ mod id {
         };
     }
 
-    tag!(Repo, Module, Release, DepGroup);
+    tag!(Repo, Module, Release, RelationshipGroup, Relationship);
 }
 
 pub type RepoId = Id<id::Repo>;
 pub type ModuleId = Id<id::Module>;
 pub type ReleaseId = Id<id::Release>;
-pub type DepGroupId = Id<id::DepGroup>;
+pub type DepGroupId = Id<id::RelationshipGroup>;
+pub type DepId = Id<id::Relationship>;
 
 #[derive(Debug, FromSqlRow, AsExpression)]
 #[diesel(sql_type = Binary)]
@@ -252,4 +254,11 @@ where
         let t = <Option<T>>::try_from(value)?;
         Ok(t.map(Cow::Owned))
     }
+}
+
+#[derive(Debug, Error)]
+#[error("Invalid repr for {typename}: {input:?} is not a variant")]
+pub struct MissingReprError {
+    typename: &'static str,
+    input: i32,
 }

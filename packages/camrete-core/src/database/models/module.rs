@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 
+use derive_more::TryFrom;
 use diesel::{
+    backend::Backend,
+    deserialize::FromSql,
     dsl::{self, AsSelect, Select},
     expression::AsExpression,
     prelude::*,
@@ -13,7 +16,7 @@ use time::OffsetDateTime;
 use url::Url;
 
 use crate::{
-    database::{DepGroupId, JsonbValue, ModuleId, ReleaseId, RepoId, schema::*},
+    database::{DepGroupId, DepId, JsonbValue, ModuleId, ReleaseId, RepoId, schema::*},
     json::{DownloadChecksum, ModuleInstallDescriptor, ModuleKind, ModuleResources, ReleaseStatus},
     repo::game::GameVersion,
 };
@@ -24,6 +27,9 @@ pub use version::ModuleVersion;
 
 pub type AllModules = Select<modules::table, AsSelect<Module, Sqlite>>;
 pub type AllReleases = Select<module_releases::table, AsSelect<ModuleRelease, Sqlite>>;
+type AllDepGroups =
+    Select<module_relationship_groups::table, AsSelect<ModuleRelationshipGroup, Sqlite>>;
+type AllDeps = Select<module_relationships::table, AsSelect<ModuleRelationship, Sqlite>>;
 
 #[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name = modules)]
@@ -119,7 +125,7 @@ impl ModuleRelease {
 
     #[dsl::auto_type(no_type_alias)]
     pub fn by_version() -> _ {
-        module_releases::version.desc()
+        module_releases::version
     }
 
     #[dsl::auto_type(no_type_alias)]
@@ -206,8 +212,35 @@ pub struct NewModuleRelationshipGroup<'a> {
     pub suppress_recommendations: bool,
 }
 
-#[derive(Debug, AsExpression, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Queryable, Selectable)]
+#[diesel(table_name = module_relationship_groups)]
+#[diesel(check_for_backend(Sqlite))]
+pub struct ModuleRelationshipGroup {
+    #[diesel(column_name = group_id)]
+    pub id: DepGroupId,
+    pub release_id: ReleaseId,
+    pub ordinal: i32,
+    pub rel_type: RelationshipType,
+}
+
+impl ModuleRelationshipGroup {
+    #[dsl::auto_type(no_type_alias)]
+    pub fn all() -> _ {
+        let select: AllDepGroups = module_relationship_groups::table.select(Self::as_select());
+        select
+            .order(module_relationship_groups::rel_type)
+            .then_order_by(module_relationship_groups::ordinal)
+    }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn for_release(release_id: ReleaseId) -> _ {
+        module_relationship_groups::release_id.eq(release_id)
+    }
+}
+
+#[derive(Debug, AsExpression, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TryFrom)]
 #[diesel(sql_type = Integer)]
+#[try_from(repr)]
 #[repr(i32)]
 pub enum RelationshipType {
     Depends,
@@ -231,6 +264,17 @@ impl ToSql<Integer, Sqlite> for RelationshipType {
     }
 }
 
+impl<DB> Queryable<Integer, DB> for RelationshipType
+where
+    DB: Backend,
+    i32: FromSql<Integer, DB>,
+{
+    type Row = i32;
+    fn build(repr: i32) -> diesel::deserialize::Result<Self> {
+        Ok(repr.try_into()?)
+    }
+}
+
 #[derive(Debug, Insertable)]
 #[diesel(table_name = module_relationships)]
 #[diesel(check_for_backend(Sqlite))]
@@ -240,6 +284,32 @@ pub struct NewModuleRelationship<'a> {
     pub target_name: &'a str,
     pub target_version: Option<&'a str>,
     pub target_version_min: Option<&'a str>,
+}
+
+#[derive(Debug, Queryable, Selectable)]
+#[diesel(table_name = module_relationships)]
+#[diesel(check_for_backend(Sqlite))]
+pub struct ModuleRelationship {
+    #[diesel(column_name = relationship_id)]
+    pub id: DepId,
+    pub group_id: DepGroupId,
+    pub ordinal: i32,
+    pub target_name: String,
+    pub target_version: Option<String>,
+    pub target_version_min: Option<String>,
+}
+
+impl ModuleRelationship {
+    #[dsl::auto_type(no_type_alias)]
+    pub fn all() -> _ {
+        let select: AllDeps = module_relationships::table.select(Self::as_select());
+        select.order(module_relationships::ordinal)
+    }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn in_group(group_id: DepGroupId) -> _ {
+        module_relationships::group_id.eq(group_id)
+    }
 }
 
 #[derive(Debug, Insertable)]

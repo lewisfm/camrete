@@ -13,8 +13,7 @@ use crate::{
         models::{
             BuildRecord, NewModule, NewRelease, ReleaseMetadata, Repository, RepositoryRef,
             module::{
-                NewModuleAuthor, NewModuleLocale, NewModuleRelationship,
-                NewModuleRelationshipGroup, NewModuleTag,
+                NewModuleAuthor, NewModuleLicense, NewModuleLocale, NewModuleRelationship, NewModuleRelationshipGroup, NewModuleTag
             },
         },
         schema::*,
@@ -216,6 +215,19 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
 
         insert_into(module_authors::table)
             .values(authors)
+            .execute(&mut *self.connection)?;
+
+        let licenses = json
+            .license
+            .iter()
+            .map(|license| NewModuleLicense {
+                release_id,
+                license,
+            })
+            .collect::<Vec<_>>();
+
+        insert_into(module_licenses::table)
+            .values(licenses)
             .execute(&mut *self.connection)?;
 
         let locales = json

@@ -1,7 +1,7 @@
 use std::{sync::LazyLock, time::Duration};
 
 use camrete_core::{
-    database::models::{Module, ModuleRelease},
+    database::models::{Module, ModuleRelease, module::{ModuleRelationship, ModuleRelationshipGroup}},
     diesel::{self, OptionalExtension, QueryDsl, RunQueryDsl},
     json::ReleaseStatus,
     repo::client::RepoManager,
@@ -123,7 +123,7 @@ async fn update(repo_mgr: &mut RepoManager) -> camrete_core::Result<()> {
 }
 
 async fn show(repo_mgr: &mut RepoManager, slug: String) -> Result<(), CliError> {
-    let mut md_skin = MadSkin::default();
+    let md_skin = MadSkin::default();
 
     let mut db = repo_mgr.db()?;
 
@@ -138,29 +138,25 @@ async fn show(repo_mgr: &mut RepoManager, slug: String) -> Result<(), CliError> 
     let releases: Vec<ModuleRelease> = ModuleRelease::all()
         .filter(ModuleRelease::with_parent(module.id))
         .order_by(ModuleRelease::by_version())
-        .get_results(db.as_mut())?;
+        .load(db.as_mut())?;
 
-    eprintln!("{:#?}", releases);
-
-    let Some(first) = releases.first() else {
+    let mut releases = releases.into_iter();
+    let Some(first) = releases.next() else {
         return Err(CliError::ModuleNotFound(slug));
     };
 
-    let tags = ModuleRelease::tags_for(first.id)
-        .load::<String>(db.as_mut())?;
-    let authors = ModuleRelease::authors_for(first.id)
-        .load::<String>(db.as_mut())?;
-    let licenses = ModuleRelease::licenses_for(first.id)
-        .load::<String>(db.as_mut())?;
+    let tags = ModuleRelease::tags_for(first.id).load::<String>(db.as_mut())?;
+    let authors = ModuleRelease::authors_for(first.id).load::<String>(db.as_mut())?;
+    let licenses = ModuleRelease::licenses_for(first.id).load::<String>(db.as_mut())?;
 
     print!("{} {}", first.display_name.bright_green(), first.version);
     for tag in tags {
         print!(" {}", format!("#{tag}").blue());
     }
-
     if first.release_status != ReleaseStatus::Stable {
         print!(" ({})", format!("{:?}", first.release_status).red());
     }
+    println!();
 
     println!("\n{}", md_skin.term_text(&first.summary));
 
@@ -169,15 +165,80 @@ async fn show(repo_mgr: &mut RepoManager, slug: String) -> Result<(), CliError> 
         println!();
     }
 
+    let resources = &first.metadata.resources;
+    if let Some(homepage) = &resources.homepage {
+        println!("{}", homepage.bold());
+    }
+
     println!("Authors: {}", authors.join(", "));
     println!("License: {}", licenses.join(" or "));
+
+
+    if let Some(link) = &resources.bugtracker {
+        println!("Bug tracker: {}", link.bold());
+    }
+    if let Some(link) = &resources.repository {
+        println!("Repository: {}", link.bold());
+    }
+    if let Some(link) = &resources.spacedock {
+        println!("Spacedock: {}", link.bold());
+    }
+
     if let Some(release_date) = first.release_date
         && let Ok(date_str) = release_date.format(DATE_TIME_FMT)
     {
         println!("Release date: {}", date_str);
     }
 
-    // for release in releases {}
+    if releases.len() != 0 {
+        print!(
+            "Other versions: {}",
+            releases
+                .by_ref()
+                .map(|r| r.version)
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        let remaining = releases.len();
+        if remaining != 0 {
+            print!(" and {remaining} others");
+        }
+
+        println!();
+    }
+
+    let dep_groups = ModuleRelationshipGroup::all()
+        .filter(ModuleRelationshipGroup::for_release(first.id))
+        .load(db.as_mut())?;
+
+    println!("\nRelationships:");
+
+    if dep_groups.is_empty() {
+        println!("  (None)");
+    }
+
+    for group in dep_groups {
+        let members = ModuleRelationship::all()
+            .filter(ModuleRelationship::in_group(group.id))
+            .load(db.as_mut())?;
+        let is_any_of = members.len() > 1;
+
+        print!("  ({:?}) ", group.rel_type);
+
+        if is_any_of {
+            println!("- Any of:");
+        }
+
+        for member in members {
+            if is_any_of {
+                print!("    ");
+            }
+            print!("- {}", member.target_name);
+            println!()
+        }
+    }
 
     Ok(())
 }

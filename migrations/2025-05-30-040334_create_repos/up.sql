@@ -49,7 +49,7 @@ CREATE TABLE module_releases (
 );
 
 CREATE INDEX idx_module_releases_module_id ON module_releases(module_id);
-CREATE INDEX idx_module_releases_by_version ON module_releases(module_id, version DESC);
+CREATE INDEX idx_module_releases_by_version ON module_releases(module_id, version);
 
 CREATE TABLE module_authors (
     id INTEGER PRIMARY KEY NOT NULL,
