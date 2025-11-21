@@ -39,7 +39,7 @@ pub enum JsonError {
     DisallowedMaxVersionInReplacement,
     #[diagnostic(code(camrete::json::parse))]
     #[error(transparent)]
-    Parse(#[from] simd_json::Error),
+    Parse(#[from] serde_json::Error),
 }
 
 /// A full complete release of a module, suitable for encoding into JSON.

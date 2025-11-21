@@ -12,8 +12,7 @@ use diesel::{
     serialize::{IsNull, Output, ToSql},
     sql_types::{Binary, Integer, Jsonb, Nullable},
 };
-use serde_json::Value;
-use simd_json::{from_value, to_value};
+use serde_json::{Value, from_value, to_value};
 use url::Url;
 
 use crate::{database::models, repo::game::GameVersion};

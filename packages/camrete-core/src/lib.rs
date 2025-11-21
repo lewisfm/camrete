@@ -11,8 +11,6 @@ use thiserror::Error;
 
 use crate::json::JsonError;
 
-extern crate serde_json as simd_json;
-
 pub mod database;
 mod io;
 pub mod json;
@@ -77,8 +75,8 @@ impl From<diesel::r2d2::Error> for Error {
     }
 }
 
-impl From<simd_json::Error> for Error {
-    fn from(value: simd_json::Error) -> Self {
+impl From<serde_json::Error> for Error {
+    fn from(value: serde_json::Error) -> Self {
         JsonError::Parse(value).into()
     }
 }

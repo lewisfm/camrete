@@ -233,11 +233,11 @@ impl RepoManager {
         // Parse all the assets in parallel as we receive them. The fasted-parsed ones
         // will be inserted into the database first.
         let mut tasks = JoinSet::new();
-        while let Some(mut asset) = asset_stream.try_next().await? {
+        while let Some(asset) = asset_stream.try_next().await? {
             let repo_url = repo_url.clone();
 
             tasks.spawn(async move {
-                match parse_asset(&mut asset) {
+                match parse_asset(&asset) {
                     Ok(asset) => Ok(asset),
                     Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
                         source: err,
@@ -311,23 +311,23 @@ impl RepoManager {
     }
 }
 
-fn parse_asset(asset: &mut RepoAssetBuf) -> Result<RepoAsset> {
+fn parse_asset(asset: &RepoAssetBuf) -> Result<RepoAsset> {
     match asset.variant {
         RepoAssetVariant::Release => {
-            let parsed: Box<JsonModule> = simd_json::from_slice(&asset.data)?;
+            let parsed: Box<JsonModule> = serde_json::from_slice(&asset.data)?;
             parsed.verify()?;
             Ok(RepoAsset::Release(parsed))
         }
         RepoAssetVariant::DownloadCounts => {
-            let map = simd_json::from_slice(&asset.data)?;
+            let map = serde_json::from_slice(&asset.data)?;
             Ok(RepoAsset::DownloadCounts(map))
         }
         RepoAssetVariant::RepositoryRefList => {
-            let parsed: RepositoryRefList = simd_json::from_slice(&asset.data)?;
+            let parsed: RepositoryRefList = serde_json::from_slice(&asset.data)?;
             Ok(RepoAsset::RepositoryRefList(parsed))
         }
         RepoAssetVariant::Builds => {
-            let parsed: JsonBuilds = simd_json::from_slice(&asset.data)?;
+            let parsed: JsonBuilds = serde_json::from_slice(&asset.data)?;
             let versions = parsed
                 .builds
                 .into_iter()
