@@ -66,8 +66,7 @@ table! {
         release_id -> Integer,
         module_id -> Integer,
         version -> Text,
-        up_to_date -> Bool,
-        sort_index -> Integer,
+        display_name -> Text,
         summary -> Text,
         metadata -> Binary,
         description -> Nullable<Text>,
@@ -105,7 +104,7 @@ table! {
     modules (module_id) {
         module_id -> Integer,
         repo_id -> Integer,
-        module_name -> Text,
+        module_slug -> Text,
         download_count -> Integer,
     }
 }

@@ -18,6 +18,8 @@ mod io;
 pub mod json;
 pub mod repo;
 
+pub use diesel;
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub type DbPool = Pool<ConnectionManager<SqliteConnection>>;
 pub type DbConnection = PooledConnection<ConnectionManager<SqliteConnection>>;
@@ -80,20 +82,3 @@ impl From<simd_json::Error> for Error {
         JsonError::Parse(value).into()
     }
 }
-
-// impl<E: Into<Error> + std::error::Error> From<TransactionError<E>> for Error {
-//     fn from(value: TransactionError<E>) -> Self {
-//         match value {
-//             TransactionError::Connection(e) => Self::Db(e),
-//             TransactionError::Transaction(e) => e.into(),
-//         }
-//     }
-// }
-
-// uniffi::custom_type!(Url, String, {
-//     remote,
-//     lower: |s| s.to_string(),
-//     try_lift: |s| Ok(Url::parse(&s)?),
-// });
-
-// uniffi::setup_scaffolding!();

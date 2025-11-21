@@ -8,14 +8,15 @@ CREATE TABLE repositories (
 CREATE TABLE modules (
     module_id INTEGER PRIMARY KEY NOT NULL,
     repo_id INTEGER NOT NULL REFERENCES repositories(repo_id) ON DELETE CASCADE,
-    module_name TEXT NOT NULL,
+    module_slug TEXT NOT NULL,
 
     download_count INTEGER NOT NULL DEFAULT 0,
 
-    UNIQUE (repo_id, module_name)
+    UNIQUE (repo_id, module_slug)
 );
 
 CREATE INDEX idx_modules_repo_id ON modules(repo_id);
+CREATE INDEX idx_modules_slug ON modules(module_slug);
 
 -- Module releases & relationships
 
@@ -23,10 +24,9 @@ CREATE TABLE module_releases (
     -- Required fields
     release_id INTEGER PRIMARY KEY NOT NULL,
     module_id INTEGER NOT NULL REFERENCES modules(module_id) ON DELETE CASCADE,
-    version TEXT NOT NULL,
+    version TEXT NOT NULL COLLATE MODULE_VERSION,
 
-    sort_index INTEGER NOT NULL DEFAULT 0,
-    up_to_date INTEGER NOT NULL DEFAULT FALSE,
+    display_name TEXT NOT NULL,
     summary TEXT NOT NULL, -- aka abstract
     -- authors BLOB NOT NULL, -- string[]
     metadata BLOB NOT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE module_releases (
 );
 
 CREATE INDEX idx_module_releases_module_id ON module_releases(module_id);
-CREATE INDEX idx_module_releases_module_id_sort_index ON module_releases(module_id, sort_index);
+CREATE INDEX idx_module_releases_by_version ON module_releases(module_id, version DESC);
 
 CREATE TABLE module_authors (
     id INTEGER PRIMARY KEY NOT NULL,

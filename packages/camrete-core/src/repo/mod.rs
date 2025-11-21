@@ -1,10 +1,11 @@
+pub mod asset_stream;
 pub mod client;
 pub mod game;
-pub mod module;
-pub mod asset_stream;
 
-pub use client::{RepoManager, RepoUnpackError, DownloadProgress};
-pub use asset_stream::{RepoAsset, RepoAssetVariant, TarGzAssetLoader, RepoAssetLoader, RepoAssetBuf};
+pub use asset_stream::{
+    RepoAsset, RepoAssetBuf, RepoAssetLoader, RepoAssetVariant, TarGzAssetLoader,
+};
+pub use client::{DownloadProgress, RepoManager, RepoUnpackError};
 
 // #[derive(Debug, PartialEq, Eq, Default)]
 // struct Repository {

@@ -1,9 +1,36 @@
 use std::{sync::LazyLock, time::Duration};
 
-use camrete_core::repo::client::RepoManager;
+use camrete_core::{
+    database::models::{Module, ModuleRelease},
+    diesel::{self, OptionalExtension, QueryDsl, RunQueryDsl},
+    json::ReleaseStatus,
+    repo::client::RepoManager,
+};
 use clap::Parser;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use miette::Diagnostic;
+use owo_colors::OwoColorize;
+use termimad::MadSkin;
+use thiserror::Error;
+use time::{format_description::BorrowedFormatItem, macros::format_description};
 use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
+
+#[derive(Debug, Error, Diagnostic)]
+enum CliError {
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Core(#[from] camrete_core::Error),
+
+    #[error("No such module: {0}")]
+    #[diagnostic(code(camrete::module_not_found))]
+    ModuleNotFound(String),
+}
+
+impl From<diesel::result::Error> for CliError {
+    fn from(value: diesel::result::Error) -> Self {
+        camrete_core::Error::from(value).into()
+    }
+}
 
 #[derive(Debug, clap::Parser)]
 struct Args {
@@ -14,6 +41,10 @@ struct Args {
 #[derive(Debug, clap::Subcommand)]
 enum Command {
     Update {},
+    /// Show the details for a mod.
+    Show {
+        identifier: String,
+    },
 }
 
 #[tokio::main]
@@ -31,6 +62,9 @@ async fn main() -> miette::Result<()> {
     match args.command {
         Command::Update {} => {
             update(&mut repo_mgr).await?;
+        }
+        Command::Show { identifier } => {
+            show(&mut repo_mgr, identifier).await?;
         }
     }
 
@@ -88,6 +122,66 @@ async fn update(repo_mgr: &mut RepoManager) -> camrete_core::Result<()> {
     Ok(())
 }
 
+async fn show(repo_mgr: &mut RepoManager, slug: String) -> Result<(), CliError> {
+    let mut md_skin = MadSkin::default();
+
+    let mut db = repo_mgr.db()?;
+
+    let Some(module) = Module::all()
+        .filter(Module::with_slug(&slug))
+        .get_result(db.as_mut())
+        .optional()?
+    else {
+        return Err(CliError::ModuleNotFound(slug));
+    };
+
+    let releases: Vec<ModuleRelease> = ModuleRelease::all()
+        .filter(ModuleRelease::with_parent(module.id))
+        .order_by(ModuleRelease::by_version())
+        .get_results(db.as_mut())?;
+
+    eprintln!("{:#?}", releases);
+
+    let Some(first) = releases.first() else {
+        return Err(CliError::ModuleNotFound(slug));
+    };
+
+    let tags = ModuleRelease::tags_for(first.id)
+        .load::<String>(db.as_mut())?;
+    let authors = ModuleRelease::authors_for(first.id)
+        .load::<String>(db.as_mut())?;
+    let licenses = ModuleRelease::licenses_for(first.id)
+        .load::<String>(db.as_mut())?;
+
+    print!("{} {}", first.display_name.bright_green(), first.version);
+    for tag in tags {
+        print!(" {}", format!("#{tag}").blue());
+    }
+
+    if first.release_status != ReleaseStatus::Stable {
+        print!(" ({})", format!("{:?}", first.release_status).red());
+    }
+
+    println!("\n{}", md_skin.term_text(&first.summary));
+
+    if let Some(description) = &first.description {
+        println!("{}", md_skin.term_text(description));
+        println!();
+    }
+
+    println!("Authors: {}", authors.join(", "));
+    println!("License: {}", licenses.join(" or "));
+    if let Some(release_date) = first.release_date
+        && let Ok(date_str) = release_date.format(DATE_TIME_FMT)
+    {
+        println!("Release date: {}", date_str);
+    }
+
+    // for release in releases {}
+
+    Ok(())
+}
+
 const PROGRESS_CHARS: &str = "=> ";
 pub static PROGRESS_STYLE_DOWNLOAD: LazyLock<ProgressStyle> = LazyLock::new(|| {
     ProgressStyle::with_template(
@@ -102,3 +196,6 @@ pub static PROGRESS_STYLE_SPINNER: LazyLock<ProgressStyle> = LazyLock::new(|| {
         .expect("progress style valid")
         .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✓")
 });
+
+const DATE_TIME_FMT: &[BorrowedFormatItem] =
+    format_description!("[day] [month repr:short] [year], [hour]:[minute]");

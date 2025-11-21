@@ -1,17 +1,22 @@
-use camrete_core::database::models::RepositoryRef;
-use camrete_core::repo::{RepoManager, TarGzAssetLoader};
-use camrete_core::repo::asset_stream::bench::{AssetDirLoader, InMemoryAssetLoader};
-use camrete_core::repo::client::DownloadProgressReporter;
-use criterion::{Criterion, criterion_main};
-use tokio::fs::read;
-use std::hint::black_box;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::runtime::Runtime;
+use std::{
+    hint::black_box,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use camrete_core::{
+    database::models::RepositoryRef,
+    repo::{
+        RepoManager, TarGzAssetLoader,
+        asset_stream::bench::{InMemoryAssetLoader},
+        client::DownloadProgressReporter,
+    },
+};
+use criterion::{Criterion, criterion_group, criterion_main};
+use tokio::{fs::read, runtime::Runtime};
 use url::Url;
 
-fn criterion_benchmark(c: &mut Criterion) {
+fn bench(c: &mut Criterion) {
     c.bench_function("unpack_repo", |b| {
         b.to_async(Runtime::new().unwrap())
             .iter_custom(|iters| async move {
@@ -50,10 +55,5 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-pub fn benches() {
-    let mut criterion: Criterion<_> = Criterion::default().configure_from_args();
-
-    criterion_benchmark(&mut criterion);
-}
-
+criterion_group!(benches, bench);
 criterion_main!(benches);

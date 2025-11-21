@@ -101,7 +101,8 @@ pub type DepGroupId = Id<id::DepGroup>;
 #[diesel(sql_type = Binary)]
 pub struct JsonbValue(pub Value);
 
-// These traits are for converting this helper struct to serialized data for SQL.
+// These traits are for converting this helper struct to serialized data for
+// SQL.
 
 // BLOB NOT NULL -> Self
 
@@ -153,8 +154,8 @@ where
     }
 }
 
-// These traits are for converting this helper struct to and from strongly typed data.
-// Other types <-> Self
+// These traits are for converting this helper struct to and from strongly typed
+// data. Other types <-> Self
 
 macro_rules! jsonb_convertable {
     ($($type:ty),+) => {

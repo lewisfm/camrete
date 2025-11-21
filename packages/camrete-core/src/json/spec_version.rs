@@ -1,7 +1,7 @@
 //! Serializable spec version.
 //!
-//! It has a special case for v1.0, which is serialized as integer `1` instead of string `"v1.0"` like
-//! other versions would be.
+//! It has a special case for v1.0, which is serialized as integer `1` instead
+//! of string `"v1.0"` like other versions would be.
 
 use std::fmt::{self, Formatter};
 

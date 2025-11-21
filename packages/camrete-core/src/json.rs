@@ -130,7 +130,8 @@ impl JsonModule {
         Ok(())
     }
 
-    /// Returns all relationships (not including any replaced_by specs) alongside their corresponding types.
+    /// Returns all relationships (not including any replaced_by specs)
+    /// alongside their corresponding types.
     pub fn relationships(&self) -> impl Iterator<Item = (RelationshipType, &MetaRelationship)> {
         self.depends
             .iter()
@@ -277,7 +278,9 @@ pub enum ModuleInstallSourceDirective {
     FindRegexp(String),
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, TryFrom, Clone, Copy)]
+#[derive(
+    Debug, Serialize, Deserialize, Default, TryFrom, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
+)]
 #[serde(rename_all = "snake_case")]
 #[try_from(repr)]
 #[repr(i32)]

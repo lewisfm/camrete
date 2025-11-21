@@ -1,0 +1,56 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug executable 'camrete'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=camrete",
+                    "--package=camrete"
+                ]
+            },
+            "args": []
+        },
+        {
+            "name": "Debug unit tests in executable 'camrete'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bin=camrete",
+                    "--package=camrete"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'camrete_core'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=camrete-core"
+                ]
+            }
+        },
+        {
+            "name": "Debug benchmark 'unpack_repo'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bench=unpack_repo",
+                    "--package=camrete-core"
+                ]
+            }
+        }
+    ]
+}

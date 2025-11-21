@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use diesel::{
-    dsl::{AsSelect, Eq, Select},
+    dsl::{self, AsSelect, Select},
     expression::AsExpression,
     prelude::*,
     serialize::{IsNull, Output, ToSql},
@@ -13,24 +13,44 @@ use time::OffsetDateTime;
 use url::Url;
 
 use crate::{
-    database::{
-        DepGroupId, JsonbValue, ModuleId, ReleaseId, RepoId,
-        models::module::version::ModuleVersion, schema::*,
-    },
+    database::{DepGroupId, JsonbValue, ModuleId, ReleaseId, RepoId, schema::*},
     json::{DownloadChecksum, ModuleInstallDescriptor, ModuleKind, ModuleResources, ReleaseStatus},
     repo::game::GameVersion,
 };
 
 mod version;
 
+pub use version::ModuleVersion;
+
+pub type AllModules = Select<modules::table, AsSelect<Module, Sqlite>>;
+pub type AllReleases = Select<module_releases::table, AsSelect<ModuleRelease, Sqlite>>;
+
 #[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name = modules)]
 #[diesel(check_for_backend(Sqlite))]
 pub struct Module {
-    pub module_id: ModuleId,
-    pub repo_id: i32,
-    pub module_name: String,
+    #[diesel(column_name = module_id)]
+    pub id: ModuleId,
+    pub repo_id: RepoId,
+    #[diesel(column_name = module_slug)]
+    pub slug: String,
     pub download_count: i32,
+}
+
+impl Module {
+    pub fn all() -> AllModules {
+        modules::table.select(Self::as_select())
+    }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn in_repo(repo: RepoId) -> _ {
+        modules::repo_id.eq(repo)
+    }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn with_slug(slug: &'_ str) -> _ {
+        modules::module_slug.eq(slug)
+    }
 }
 
 #[derive(Debug, Insertable)]
@@ -38,7 +58,8 @@ pub struct Module {
 #[diesel(check_for_backend(Sqlite))]
 pub struct NewModule<'a> {
     pub repo_id: RepoId,
-    pub module_name: &'a str,
+    #[diesel(column_name = module_slug)]
+    pub slug: &'a str,
 }
 
 #[derive(Debug, Insertable)]
@@ -47,6 +68,7 @@ pub struct NewModule<'a> {
 pub struct NewRelease<'a> {
     pub module_id: ModuleId,
     pub version: &'a str,
+    pub display_name: &'a str,
     #[diesel(serialize_as = i32)]
     pub kind: ModuleKind,
     pub summary: &'a str,
@@ -69,10 +91,11 @@ pub struct NewRelease<'a> {
 #[diesel(table_name = module_releases)]
 #[diesel(check_for_backend(Sqlite))]
 pub struct ModuleRelease {
-    pub release_id: ReleaseId,
+    #[diesel(column_name = release_id)]
+    pub id: ReleaseId,
     pub module_id: ModuleId,
     pub version: String,
-    pub sort_index: i32,
+    pub display_name: String,
     pub summary: String,
     #[diesel(deserialize_as = JsonbValue)]
     pub metadata: ReleaseMetadata<'static>,
@@ -89,23 +112,42 @@ pub struct ModuleRelease {
     pub release_date: Option<OffsetDateTime>,
 }
 
-type AllSortable = Select<module_releases::table, AsSelect<SortableRelease, Sqlite>>;
-
-#[derive(Debug, Queryable, Selectable)]
-#[diesel(table_name = module_releases)]
-#[diesel(check_for_backend(Sqlite))]
-pub struct SortableRelease {
-    pub release_id: ReleaseId,
-    pub version: ModuleVersion<'static>,
-}
-
-impl SortableRelease {
-    pub fn all() -> AllSortable {
-        module_releases::table.select(Self::as_select())
+impl ModuleRelease {
+    pub fn all() -> AllReleases {
+        module_releases::table.select(ModuleRelease::as_select())
     }
 
-    pub fn with_parent(mod_id: ModuleId) -> Eq<module_releases::module_id, ModuleId> {
-        module_releases::module_id.eq(mod_id)
+    #[dsl::auto_type(no_type_alias)]
+    pub fn by_version() -> _ {
+        module_releases::version.desc()
+    }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn with_parent(module_id: ModuleId) -> _ {
+        module_releases::module_id.eq(module_id)
+    }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn tags_for(release: ReleaseId) -> _ {
+        module_tags::table
+            .select(module_tags::tag)
+            .filter(module_tags::release_id.eq(release))
+            .order(module_tags::ordinal)
+    }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn authors_for(release: ReleaseId) -> _ {
+        module_authors::table
+            .select(module_authors::author)
+            .filter(module_authors::release_id.eq(release))
+            .order(module_authors::ordinal)
+    }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn licenses_for(release: ReleaseId) -> _ {
+        module_licenses::table
+            .select(module_licenses::license)
+            .filter(module_licenses::release_id.eq(release))
     }
 }
 

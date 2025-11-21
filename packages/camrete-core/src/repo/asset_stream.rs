@@ -1,16 +1,15 @@
 use std::{
-    collections::HashMap, io::Cursor, path::{Path, PathBuf}, sync::Arc
+    collections::HashMap,
+    io::Cursor,
+    path::{Path, PathBuf},
 };
 
 use async_compression::tokio::bufread::GzipDecoder;
 use derive_more::From;
 use futures_core::stream::BoxStream;
-use futures_util::{StreamExt, TryStreamExt, stream::try_unfold};
+use futures_util::{StreamExt, TryStreamExt};
 use strum::EnumDiscriminants;
-use tokio::{
-    fs::{ReadDir, read, read_dir},
-    io::{AsyncBufRead, AsyncReadExt},
-};
+use tokio::io::{AsyncBufRead, AsyncReadExt};
 use tokio_tar::Archive;
 
 use crate::{
@@ -69,7 +68,6 @@ impl<R: AsyncBufRead + Unpin> TarGzAssetLoader<R> {
             archive: Archive::new(GzipDecoder::new(stream)),
         }
     }
-
 }
 
 impl TarGzAssetLoader<Cursor<Vec<u8>>> {
@@ -111,7 +109,10 @@ impl<'a, R: AsyncBufRead + Unpin + Send + 'a> RepoAssetLoader<'a> for TarGzAsset
 /// Loaders for benchmarking.
 #[cfg(feature = "bench")]
 pub mod bench {
+    use std::sync::Arc;
+
     use async_walkdir::WalkDir;
+    use tokio::fs::read;
 
     use super::*;
 
@@ -160,7 +161,8 @@ pub mod bench {
         }
     }
 
-    /// An asset loader which holds all future assets in-memory and performs no I/O.
+    /// An asset loader which holds all future assets in-memory and performs no
+    /// I/O.
     #[derive(Debug, Clone)]
     pub struct InMemoryAssetLoader {
         pub assets: Vec<RepoAssetBuf>,

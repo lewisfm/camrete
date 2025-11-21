@@ -1,11 +1,12 @@
+use std::{
+    fmt::{self, Formatter, Write},
+    str::FromStr,
+};
+
 use derive_more::{Deref, From, Into};
 use serde::{
     Deserialize, Serialize,
     de::{self, Unexpected, Visitor},
-};
-use std::{
-    fmt::{self, Formatter, Write},
-    str::FromStr,
 };
 
 use crate::repo::game::GameVersion;
@@ -82,9 +83,8 @@ impl<'a> Deserialize<'a> for MetaGameVersion {
 mod test {
     use serde_test::{Token, assert_de_tokens, assert_tokens};
 
-    use crate::repo::game::GameVersion;
-
     use super::MetaGameVersion;
+    use crate::repo::game::GameVersion;
 
     #[test]
     fn de_any() {

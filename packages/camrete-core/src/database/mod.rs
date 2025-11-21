@@ -1,7 +1,7 @@
-use std::{borrow::Cow, ops::DerefMut, sync::Arc};
+use std::{borrow::Cow, hint::black_box, ops::DerefMut, sync::Arc};
 
 use derive_more::From;
-use diesel::{insert_into, prelude::*, replace_into, update, upsert::excluded};
+use diesel::{insert_into, prelude::*, replace_into, upsert::excluded};
 use reqwest::header::HeaderValue;
 use tokio::{runtime::Handle, task::block_in_place};
 use tracing::{debug, info, instrument, trace};
@@ -14,7 +14,7 @@ use crate::{
             BuildRecord, NewModule, NewRelease, ReleaseMetadata, Repository, RepositoryRef,
             module::{
                 NewModuleAuthor, NewModuleLocale, NewModuleRelationship,
-                NewModuleRelationshipGroup, NewModuleTag, SortableRelease,
+                NewModuleRelationshipGroup, NewModuleTag,
             },
         },
         schema::*,
@@ -48,8 +48,9 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         self.connection.transaction(|conn| func(RepoDB::new(conn)))
     }
 
-    /// Fetches all repositories from the database, ordered by name. If `create_default` is specified and
-    /// no repos currently exist, the default repo will be created and returned.
+    /// Fetches all repositories from the database, ordered by name. If
+    /// `create_default` is specified and no repos currently exist, the
+    /// default repo will be created and returned.
     #[instrument(skip(self))]
     pub fn all_repos(&mut self, create_default: bool) -> QueryResult<Vec<Repository>> {
         use schema::repositories::dsl::*;
@@ -94,23 +95,23 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         Ok(id)
     }
 
-    /// Register a module with the given name. This will never overwrite any module, it just
-    /// ensures one exists and returns its ID.
+    /// Register a module with the given name. This will never overwrite any
+    /// module, it just ensures one exists and returns its ID.
     #[instrument(skip_all)]
     pub fn register_module(&mut self, new_module: NewModule) -> QueryResult<ModuleId> {
         use schema::modules::dsl::*;
 
         debug!(
             repo_id = ?new_module.repo_id,
-            name = ?new_module.module_name,
+            slug = ?new_module.slug,
             "Registering a module"
         );
 
         let id = insert_into(modules)
             .values(new_module)
-            .on_conflict((repo_id, module_name))
+            .on_conflict((repo_id, module_slug))
             .do_update()
-            .set(module_name.eq(excluded(module_name)))
+            .set(module_slug.eq(excluded(module_slug)))
             .returning(module_id)
             .get_result::<ModuleId>(&mut *self.connection)?;
 
@@ -134,12 +135,16 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
             "Creating release"
         );
 
+        if json.identifier == "Parallax" { // dbg
+            black_box(());
+        }
+
         let module_id = if let Some(id) = module_id {
             id
         } else {
             self.register_module(NewModule {
                 repo_id,
-                module_name: &json.name,
+                slug: &json.identifier,
             })?
         };
 
@@ -155,6 +160,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         let new_release = NewRelease {
             module_id,
             version: &json.version,
+            display_name: &json.name,
             kind: json.kind,
             summary: &json.r#abstract,
             metadata,
@@ -172,8 +178,8 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
             release_date: json.release_date,
         };
 
-        // Some mods have duplicate releases, which isn't allowed but it's better to ignore that
-        // than to error here.
+        // Some mods have duplicate releases, which isn't allowed but it's better to
+        // ignore that than to error here.
         let release_id = replace_into(module_releases::table)
             .values(new_release)
             .returning(module_releases::release_id)
@@ -222,8 +228,9 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
             .values(locales)
             .execute(&mut *self.connection)?;
 
-        // Relationships are a little more complicated because they can be stored either as direct or any_of groups.
-        // In the database these are the same thing, so we have to convert first.
+        // Relationships are a little more complicated because they can be stored either
+        // as direct or any_of groups. In the database these are the same thing,
+        // so we have to convert first.
 
         for (ordinal, (rel_type, relation)) in json.relationships().enumerate() {
             let group = NewModuleRelationshipGroup {
@@ -234,8 +241,9 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
                 suppress_recommendations: relation.suppress_recommendations,
             };
 
-            // Insert by explicitly specifying each column so Diesel can infer the correct InsertValues.
-            // Convert `rel_type` to a SQL-compatible value (here using `.into()` / cast to i32 if appropriate).
+            // Insert by explicitly specifying each column so Diesel can infer the correct
+            // InsertValues. Convert `rel_type` to a SQL-compatible value (here
+            // using `.into()` / cast to i32 if appropriate).
             let group_id = insert_into(module_relationship_groups::table)
                 .values(group)
                 .returning(module_relationship_groups::group_id)
@@ -277,8 +285,8 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         Ok(())
     }
 
-    /// Attach the given download counts to their corresponding modules. Creates the modules if they
-    /// don't exist yet.
+    /// Attach the given download counts to their corresponding modules. Creates
+    /// the modules if they don't exist yet.
     #[instrument(skip(self, counts))]
     pub fn add_download_counts<'a, C>(&mut self, repo: RepoId, counts: C) -> QueryResult<()>
     where
@@ -291,10 +299,10 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
         debug!(num_counts = %counts.len(), "Adding download counts to modules");
 
         let rows = counts
-            .map(|(name, count)| {
+            .map(|(slug, count)| {
                 (
                     repo_id.eq(repo),
-                    module_name.eq(name),
+                    module_slug.eq(slug),
                     download_count.eq(count),
                 )
             })
@@ -302,7 +310,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
 
         insert_into(modules)
             .values(rows)
-            .on_conflict((repo_id, module_name))
+            .on_conflict((repo_id, module_slug))
             .do_update()
             .set(download_count.eq(excluded(download_count)))
             .execute(&mut *self.connection)?;
@@ -344,35 +352,6 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
 
         Ok(())
     }
-
-    /// Update the sort order of the module.
-    #[instrument(skip(self))]
-    pub fn update_derived_module_data(&mut self, mod_id: ModuleId) -> QueryResult<()> {
-        debug!("Recomputing derived module data");
-
-        let mut releases = SortableRelease::all()
-            .filter(SortableRelease::with_parent(mod_id))
-            .get_results(&mut *self.connection)?;
-
-        releases.sort_unstable_by(|l, r| l.version.cmp(&r.version));
-
-        trace!(num_releases = %releases.len());
-
-        let mut is_most_recent = true;
-        for (ordinal, release) in releases.into_iter().enumerate().rev() {
-            update(module_releases::table)
-                .filter(module_releases::release_id.eq(release.release_id))
-                .set((
-                    module_releases::sort_index.eq(ordinal as i32),
-                    module_releases::up_to_date.eq(is_most_recent),
-                ))
-                .execute(&mut *self.connection)?;
-
-            is_most_recent = false;
-        }
-
-        Ok(())
-    }
 }
 
 impl<T: DerefMut<Target = SqliteConnection> + Send> RepoDB<T> {
@@ -387,5 +366,17 @@ impl<T: DerefMut<Target = SqliteConnection> + Send> RepoDB<T> {
                 Handle::current().block_on(async move { func(RepoDB::new(conn)).await })
             })
         })
+    }
+}
+
+impl<T: DerefMut<Target = SqliteConnection>> AsRef<T> for RepoDB<T> {
+    fn as_ref(&self) -> &T {
+        &self.connection
+    }
+}
+
+impl<T: DerefMut<Target = SqliteConnection>> AsMut<T> for RepoDB<T> {
+    fn as_mut(&mut self) -> &mut T {
+        &mut self.connection
     }
 }

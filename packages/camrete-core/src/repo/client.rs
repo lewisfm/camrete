@@ -1,15 +1,13 @@
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
+    collections::HashMap,
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
 };
 
-use async_compression::tokio::bufread::GzipDecoder;
-use derive_more::From;
 use diesel::{
     connection::SimpleConnection,
     delete,
@@ -17,20 +15,16 @@ use diesel::{
     r2d2::{ConnectionManager, Pool},
 };
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
-use futures_core::stream::BoxStream;
-use futures_util::{StreamExt, TryStreamExt, stream::try_unfold};
+use futures_util::TryStreamExt;
 use miette::Diagnostic;
 use reqwest::{
     Response,
     header::{ACCEPT, CONTENT_TYPE, ETAG, HeaderValue},
 };
-use strum::EnumDiscriminants;
 use tokio::{
-    fs::{ReadDir, read, read_dir},
-    io::{self, AsyncBufRead, AsyncReadExt},
+    io::{self},
     task::JoinSet,
 };
-use tokio_tar::Archive;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 use tracing::{debug, info, instrument, trace};
 use url::Url;
@@ -39,7 +33,7 @@ use crate::{
     DIRS, DbConnection, DbPool, Error, Result, USER_AGENT,
     database::{
         RepoDB,
-        models::{BuildRecord, Repository},
+        models::{BuildRecord, Repository, module::ModuleVersion},
     },
     io::AsyncReadExt as _,
     json::{JsonBuilds, JsonError, JsonModule, RepositoryRefList},
@@ -124,7 +118,8 @@ impl RepoManager {
         let mut conn = pool.get()?;
 
         // see https://fractaledmind.github.io/2023/09/07/enhancing-rails-sqlite-fine-tuning/
-        // sleep if the database is busy, this corresponds to up to 2 seconds sleeping time.
+        // sleep if the database is busy, this corresponds to up to 2 seconds sleeping
+        // time.
         conn.batch_execute("PRAGMA busy_timeout = 2000;")?;
         // better write-concurrency
         conn.batch_execute("PRAGMA journal_mode = WAL;")?;
@@ -137,6 +132,10 @@ impl RepoManager {
         conn.batch_execute("PRAGMA wal_checkpoint(TRUNCATE);")?;
 
         conn.batch_execute("PRAGMA foreign_keys = ON;")?;
+
+        conn.register_collation("MODULE_VERSION", |left: &str, right: &str| {
+            ModuleVersion::from(left).cmp(&ModuleVersion::from(right))
+        })?;
 
         conn.run_pending_migrations(MIGRATIONS)
             .map_err(Error::DbMigrations)?;
@@ -154,7 +153,8 @@ impl RepoManager {
         Ok(RepoDB::new(self.database.get()?))
     }
 
-    /// Downloads the given repository from an online URL, unpacks it, then inserts it into the repository database.
+    /// Downloads the given repository from an online URL, unpacks it, then
+    /// inserts it into the repository database.
     #[instrument(skip(self, progress_reporter))]
     pub async fn download(
         &mut self,
@@ -230,8 +230,8 @@ impl RepoManager {
         let mut asset_stream = loader.asset_stream()?;
         let repo_url = Arc::new(repo.url.clone());
 
-        // Parse all the assets in parallel as we receive them. The fasted-parsed ones will be inserted
-        // into the database first.
+        // Parse all the assets in parallel as we receive them. The fasted-parsed ones
+        // will be inserted into the database first.
         let mut tasks = JoinSet::new();
         while let Some(mut asset) = asset_stream.try_next().await? {
             let repo_url = repo_url.clone();
@@ -256,7 +256,8 @@ impl RepoManager {
 
             db.set_etag(repo_url.clone(), etag.as_ref())?;
 
-            // Remove any previous modules so that we are only left with the ones currently included in the repo.
+            // Remove any previous modules so that we are only left with the ones currently
+            // included in the repo.
             delete(modules::table)
                 .filter(modules::repo_id.eq(repo.repo_id))
                 .execute(db.connection)?;
@@ -301,10 +302,7 @@ impl RepoManager {
                 progress.report_unpacked_item();
             }
 
-            progress.report_indexing();
-            for mod_id in updated_mods.values().cloned() {
-                db.update_derived_module_data(mod_id)?;
-            }
+            // progress.report_indexing();
 
             Ok(())
         })?;
@@ -346,7 +344,8 @@ fn parse_asset(asset: &mut RepoAssetBuf) -> Result<RepoAsset> {
     }
 }
 
-/// Keeps track of the most recent progress updates and calls an external function when there is a change.
+/// Keeps track of the most recent progress updates and calls an external
+/// function when there is a change.
 pub struct DownloadProgressReporter {
     report_fn: Box<dyn Fn(DownloadProgress) + Send + Sync>,
     bytes_downloaded: AtomicU64,
@@ -389,14 +388,14 @@ impl DownloadProgressReporter {
         });
     }
 
-    fn report_indexing(&self) {
-        (self.report_fn)(DownloadProgress {
-            bytes_downloaded: self.bytes_downloaded.load(Ordering::Relaxed),
-            bytes_expected: self.bytes_expected,
-            items_unpacked: self.items_unpacked.load(Ordering::Relaxed),
-            is_computing_derived_data: true,
-        });
-    }
+    // fn report_indexing(&self) {
+    //     (self.report_fn)(DownloadProgress {
+    //         bytes_downloaded: self.bytes_downloaded.load(Ordering::Relaxed),
+    //         bytes_expected: self.bytes_expected,
+    //         items_unpacked: self.items_unpacked.load(Ordering::Relaxed),
+    //         is_computing_derived_data: true,
+    //     });
+    // }
 }
 
 /// A snapshot of the progress of a repository download.

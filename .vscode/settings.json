@@ -1,10 +1,11 @@
 {
     "lldb.rpcServer": {
         "host": "127.0.0.1",
-        "port": 12345,
+        "port": 65254,
         "token": "secret"
     },
+    "lldb.launch.sourceLanguages": ["rust"],
     "rust-analyzer.cargo.features": [
-        "bench"
+        "camrete-core/bench"
     ]
 }
