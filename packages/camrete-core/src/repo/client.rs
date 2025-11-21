@@ -23,6 +23,8 @@ use reqwest::{
 };
 use tokio::{
     io::{self},
+    spawn,
+    sync::mpsc,
     task::JoinSet,
 };
 use tokio_util::compat::FuturesAsyncReadCompatExt;
@@ -194,8 +196,11 @@ impl RepoManager {
             .map_err(io::Error::other)
             .into_async_read()
             .compat()
-            .progress(|bytes| {
-                progress.report_download_progress(bytes);
+            .progress({
+                let progress = progress.clone();
+                move |bytes| {
+                    progress.report_download_progress(bytes);
+                }
             });
 
         match content_type.as_ref() {
@@ -223,31 +228,43 @@ impl RepoManager {
     pub async fn unpack_repo(
         &mut self,
         repo: &Repository,
-        loader: impl RepoAssetLoader<'_>,
+        loader: impl RepoAssetLoader<'static>,
         etag: Option<HeaderValue>,
         progress: Arc<DownloadProgressReporter>,
     ) -> Result<(), Error> {
         let mut asset_stream = loader.asset_stream()?;
         let repo_url = Arc::new(repo.url.clone());
 
-        // Parse all the assets in parallel as we receive them. The fasted-parsed ones
+        // Parse all the assets in the background as we receive them. The fastest-parsed ones
         // will be inserted into the database first.
-        let mut tasks = JoinSet::new();
-        while let Some(asset) = asset_stream.try_next().await? {
+        let (tx, mut rx) = mpsc::channel(1000);
+        let stream_loader = spawn({
             let repo_url = repo_url.clone();
+            async move {
+                let mut tasks = JoinSet::new();
 
-            tasks.spawn(async move {
-                match parse_asset(&asset) {
-                    Ok(asset) => Ok(asset),
-                    Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
-                        source: err,
-                        url: repo_url,
-                        path: asset.path,
-                    })?,
-                    Err(err) => Err(err),
+                while let Some(asset) = asset_stream.try_next().await? {
+                    let repo_url = repo_url.clone();
+                    let tx = tx.clone();
+
+                    tasks.spawn(async move {
+                        tx.send(match parse_asset(&asset) {
+                            Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
+                                source: err,
+                                url: repo_url,
+                                path: asset.path,
+                            }
+                            .into()),
+                            other => other,
+                        }).await.unwrap();
+                    });
                 }
-            });
-        }
+
+                tasks.join_all().await;
+
+                Ok::<_, Error>(())
+            }
+        });
 
         let mut db = RepoDB::new(self.database.get()?);
 
@@ -264,8 +281,8 @@ impl RepoManager {
 
             let mut updated_mods = HashMap::new();
 
-            while let Some(asset) = tasks.join_next().await {
-                match asset.unwrap()? {
+            while let Some(asset) = rx.recv().await {
+                match asset? {
                     RepoAsset::Release(json) => {
                         let existing_mod_id = updated_mods.get(&json.name).cloned();
 
@@ -302,7 +319,7 @@ impl RepoManager {
                 progress.report_unpacked_item();
             }
 
-            // progress.report_indexing();
+            stream_loader.await.unwrap()?;
 
             Ok(())
         })?;
