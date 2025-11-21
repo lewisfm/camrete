@@ -43,7 +43,10 @@ use crate::{
     },
     io::AsyncReadExt as _,
     json::{JsonBuilds, JsonError, JsonModule, RepositoryRefList},
-    repo::{RepoAsset, RepoAssetBuf, RepoAssetLoader, RepoAssetVariant, TarGzAssetLoader, game::GameVersionParseError},
+    repo::{
+        RepoAsset, RepoAssetBuf, RepoAssetLoader, RepoAssetVariant, TarGzAssetLoader,
+        game::GameVersionParseError,
+    },
 };
 
 mod mime {
@@ -233,14 +236,16 @@ impl RepoManager {
         while let Some(mut asset) = asset_stream.try_next().await? {
             let repo_url = repo_url.clone();
 
-            tasks.spawn_blocking(move || match parse_asset(&mut asset) {
-                Ok(asset) => Ok(asset),
-                Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
-                    source: err,
-                    url: repo_url,
-                    path: asset.path,
-                })?,
-                Err(err) => Err(err),
+            tasks.spawn(async move {
+                match parse_asset(&mut asset) {
+                    Ok(asset) => Ok(asset),
+                    Err(Error::Json(err)) => Err(RepoUnpackError::InvalidJsonFile {
+                        source: err,
+                        url: repo_url,
+                        path: asset.path,
+                    })?,
+                    Err(err) => Err(err),
+                }
             });
         }
 
@@ -266,10 +271,10 @@ impl RepoManager {
                         let (mod_id, _) = db
                             .create_release(&json, repo.repo_id, existing_mod_id)
                             .map_err(|source| RepoUnpackError::InsertRelease {
-                                name: json.name.clone(),
-                                version: json.version.clone(),
-                                source,
-                            })?;
+                            name: json.name.clone(),
+                            version: json.version.clone(),
+                            source,
+                        })?;
 
                         updated_mods.insert(json.name, mod_id);
                     }
