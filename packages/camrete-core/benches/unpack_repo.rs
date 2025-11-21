@@ -12,7 +12,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.to_async(Runtime::new().unwrap())
             .iter_custom(|iters| async move {
                 let mut total = Duration::ZERO;
-                let mut repo_mgr = RepoManager::new("bench.db").unwrap();
+                let mut repo_mgr = RepoManager::new("../../target/bench.db").unwrap();
 
                 let repo_path = PathBuf::from("./benches/mini_repo");
                 let progress = Arc::new(DownloadProgressReporter::new(None, Box::new(|_| {})));
