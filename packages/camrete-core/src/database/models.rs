@@ -14,7 +14,7 @@ pub use repository::{Repository, RepositoryRef};
 #[derive(Debug, Queryable, Selectable, Insertable)]
 #[diesel(table_name = builds)]
 #[diesel(check_for_backend(Sqlite))]
-pub struct Build {
+pub struct BuildRecord {
     pub build_id: i32,
     #[diesel(serialize_as = JsonbValue, deserialize_as = JsonbValue)]
     pub version: GameVersion,

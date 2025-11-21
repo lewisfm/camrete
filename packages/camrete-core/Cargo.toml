@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 astral-tokio-tar = "0.5.6"
 async-compression = { version = "0.4.33", features = ["tokio", "gzip"] }
+async-walkdir = { version = "2.1.0", optional = true }
 bytes = "1.11.0"
 derive_more = { version = "2.0.1", features = ["deref", "from", "into", "try_from"] }
 diesel = { version = "2.3.3", features = ["sqlite", "returning_clauses_for_sqlite_3_35", "r2d2", "serde_json", "time"] }
@@ -35,6 +36,9 @@ url = { version = "2.5.7", features = ["serde"] }
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports", "async_tokio"] }
 serde_test = "1.0.177"
+
+[features]
+bench = ["dep:async-walkdir"]
 
 [[bench]]
 name = "unpack_repo"

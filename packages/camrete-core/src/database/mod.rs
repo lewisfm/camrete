@@ -11,7 +11,7 @@ use crate::{
     Error,
     database::{
         models::{
-            Build, NewModule, NewRelease, ReleaseMetadata, Repository, RepositoryRef,
+            BuildRecord, NewModule, NewRelease, ReleaseMetadata, Repository, RepositoryRef,
             module::{
                 NewModuleAuthor, NewModuleLocale, NewModuleRelationship,
                 NewModuleRelationshipGroup, NewModuleTag, SortableRelease,
@@ -257,7 +257,7 @@ impl<T: DerefMut<Target = SqliteConnection>> RepoDB<T> {
 
     /// Add the given builds to the build-id/version map.
     #[instrument(skip_all)]
-    pub fn register_builds(&mut self, new_builds: Vec<Build>) -> QueryResult<()> {
+    pub fn register_builds(&mut self, new_builds: Vec<BuildRecord>) -> QueryResult<()> {
         use schema::builds::dsl::*;
 
         debug!(count = %new_builds.len(), "Registering new builds");

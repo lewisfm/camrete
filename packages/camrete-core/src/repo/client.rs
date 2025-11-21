@@ -39,11 +39,11 @@ use crate::{
     DIRS, DbConnection, DbPool, Error, Result, USER_AGENT,
     database::{
         RepoDB,
-        models::{Build, Repository},
+        models::{BuildRecord, Repository},
     },
     io::AsyncReadExt as _,
     json::{JsonBuilds, JsonError, JsonModule, RepositoryRefList},
-    repo::game::GameVersionParseError,
+    repo::{RepoAsset, RepoAssetBuf, RepoAssetLoader, RepoAssetVariant, TarGzAssetLoader, game::GameVersionParseError},
 };
 
 mod mime {
@@ -199,8 +199,8 @@ impl RepoManager {
             mime::GZIP | mime::X_GZIP => {
                 debug!("Using tar.gz unpacker");
 
-                let unpacker = TarGzUnpacker::new(download_stream);
-                self.unpack_repo(repo, unpacker, new_etag, progress.clone())
+                let loader = TarGzAssetLoader::new(download_stream);
+                self.unpack_repo(repo, loader, new_etag, progress.clone())
                     .await?;
             }
             mime::ZIP => todo!("unpacking of .zip repos"),
@@ -220,11 +220,11 @@ impl RepoManager {
     pub async fn unpack_repo(
         &mut self,
         repo: &Repository,
-        unpacker: impl RepoUnpacker<'_>,
+        loader: impl RepoAssetLoader<'_>,
         etag: Option<HeaderValue>,
         progress: Arc<DownloadProgressReporter>,
     ) -> Result<(), Error> {
-        let mut asset_stream = unpacker.asset_stream()?;
+        let mut asset_stream = loader.asset_stream()?;
         let repo_url = Arc::new(repo.url.clone());
 
         // Parse all the assets in parallel as we receive them. The fasted-parsed ones will be inserted
@@ -328,7 +328,7 @@ fn parse_asset(asset: &mut RepoAssetBuf) -> Result<RepoAsset> {
                 .builds
                 .into_iter()
                 .map(|(build_id, version)| {
-                    Ok(Build {
+                    Ok(BuildRecord {
                         build_id,
                         version: version.parse()?,
                     })
@@ -426,127 +426,4 @@ fn content_type(response: &Response) -> Option<Cow<'static, str>> {
     }
 
     None
-}
-
-#[derive(Debug, From, EnumDiscriminants)]
-#[strum_discriminants(name(RepoAssetVariant))]
-pub enum RepoAsset {
-    Builds(Vec<Build>),
-    Release(Box<JsonModule>),
-    DownloadCounts(HashMap<String, i32>),
-    RepositoryRefList(RepositoryRefList),
-}
-
-impl RepoAssetVariant {
-    fn from_path(path: &Path) -> Option<Self> {
-        let filename = path.file_name()?;
-
-        Some(match filename.as_encoded_bytes() {
-            b"builds.json" => Self::Builds,
-            b"repositories.json" => Self::RepositoryRefList,
-            b"download_counts.json" => Self::DownloadCounts,
-            name if name.ends_with(b".ckan") => Self::Release,
-            _ => return None,
-        })
-    }
-}
-
-pub struct RepoAssetBuf {
-    pub path: PathBuf,
-    pub variant: RepoAssetVariant,
-    pub data: Box<[u8]>,
-}
-
-pub trait RepoUnpacker<'a> {
-    /// Returns a stream of items in the repository as they are downloaded.
-    fn asset_stream(self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>>;
-}
-
-/// Unpacks a gzipped tar archive of a repository.
-pub struct TarGzUnpacker<R: AsyncBufRead + Unpin> {
-    archive: Archive<GzipDecoder<R>>,
-}
-
-impl<R: AsyncBufRead + Unpin> TarGzUnpacker<R> {
-    fn new(stream: R) -> Self {
-        Self {
-            archive: Archive::new(GzipDecoder::new(stream)),
-        }
-    }
-}
-
-impl<'a, R: AsyncBufRead + Unpin + Send + 'a> RepoUnpacker<'a> for TarGzUnpacker<R> {
-    fn asset_stream(mut self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>> {
-        let entries = self.archive.entries()?;
-
-        Ok(entries
-            .map_err(Error::from)
-            .try_filter_map(async |mut item| {
-                let path = item.path()?.into_owned();
-                let Some(variant) = RepoAssetVariant::from_path(path.as_ref()) else {
-                    return Ok(None);
-                };
-
-                let mut buf = Vec::new();
-                item.read_to_end(&mut buf).await?;
-
-                let asset = RepoAssetBuf {
-                    variant,
-                    path,
-                    data: buf.into_boxed_slice(),
-                };
-
-                Ok(Some(asset))
-            })
-            .boxed())
-    }
-}
-
-/// Reads a directory containing assets from the file system.
-pub struct DirUnpacker {
-    path: PathBuf,
-    reader: ReadDir,
-}
-
-impl DirUnpacker {
-    pub async fn new(path: PathBuf) -> Result<Self, Error> {
-        Ok(Self {
-            reader: read_dir(&path).await?,
-            path,
-        })
-    }
-}
-
-impl<'a> RepoUnpacker<'a> for DirUnpacker {
-    fn asset_stream(self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>> {
-        let base_path = Arc::new(self.path);
-
-        let read_stream = try_unfold(self.reader, |mut dir| async move {
-            if let Some(entry) = dir.next_entry().await? {
-                Ok::<_, Error>(Some((entry, dir)))
-            } else {
-                Ok(None)
-            }
-        })
-        .try_filter_map(move |item| {
-            let base_path = base_path.clone();
-            async move {
-                let path = item.path();
-                let Some(variant) = RepoAssetVariant::from_path(&path) else {
-                    return Ok(None);
-                };
-
-                let asset = RepoAssetBuf {
-                    variant,
-                    data: read(&path).await?.into(),
-                    path: path.strip_prefix(&*base_path).unwrap().to_owned(),
-                };
-
-                Ok(Some(asset))
-            }
-        })
-        .boxed();
-
-        Ok(read_stream)
-    }
 }
