@@ -44,17 +44,26 @@ fn main() -> Result<()> {
             mut args,
             release,
         } => {
-            let default_platform = default_triple();
+            let native_platform = default_triple();
 
             eprintln!("--- Building dynamic libs & .NET bindings ---");
             let mut target: HashSet<String> = HashSet::from_iter(target);
-            target.insert(default_platform.triple.clone());
+            target.insert(native_platform.triple.clone());
 
             for triple in target {
                 eprintln!("Building {triple}");
                 let platform = lookup_triple(triple);
 
-                let mut cmd = cargo();
+                let needs_cross = native_platform.needs_cross_for(&platform);
+                if needs_cross {
+                    eprintln!("(Using `cross` for cross-compilation)");
+                }
+
+                let mut cmd = if needs_cross {
+                    process::Command::new("cross")
+                } else {
+                    cargo()
+                };
                 cmd.args(["build", "-p", "camrete-ffi", "--target", &platform.triple]);
                 if release {
                     cmd.arg("--release");
@@ -78,7 +87,7 @@ fn main() -> Result<()> {
 
                 fs::copy(&dll_path, rt_dir.join(&dll_name))?;
 
-                if platform.triple == default_platform.triple {
+                if platform.triple == native_platform.triple {
                     // Dotnet's platform-aware assembly resolution doesn't work for ProjectReferences.
                     // As a work around, ALSO copy the native dylib into a separate location where it
                     // can be easily consumed.
@@ -93,9 +102,9 @@ fn main() -> Result<()> {
                         "--out-dir=dotnet/Core".into(),
                         "--config=uniffi.toml".into(),
                         "--library".into(),
-                        default_platform
+                        native_platform
                             .target_dir(release)
-                            .join(default_platform.dll("camrete"))
+                            .join(native_platform.dll("camrete"))
                             .into_os_string(),
                     ]);
                     launch_bin("gen-dotnet", &args)?;
@@ -183,5 +192,17 @@ impl TripleDetails {
         PathBuf::from("target")
             .join(&self.triple)
             .join(if release { "release" } else { "debug" })
+    }
+
+    fn needs_cross_for(&self, target: &Self) -> bool {
+        if self.rid.starts_with("osx") && target.rid.starts_with("osx") {
+            return false;
+        }
+
+        if self.rid.starts_with("win") && target.rid.starts_with("win") {
+            return false;
+        }
+
+        self.rid != target.rid
     }
 }
