@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     env::{self, set_current_dir},
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     path::PathBuf,
     process::{self, exit},
 };
@@ -29,7 +29,7 @@ enum Command {
             allow_hyphen_values = true,
             value_name = "BUILD-OPTIONS"
         )]
-        args: Vec<String>,
+        args: Vec<OsString>,
     },
 }
 
@@ -44,25 +44,18 @@ fn main() -> Result<()> {
             mut args,
             release,
         } => {
-            args.extend([
-                "--out-dir=dotnet/Core".into(),
-                "--config=uniffi.toml".into(),
-                "packages/ffi/src/CamreteCore.udl".into(),
-            ]);
-            launch_bin("gen-dotnet", &args)?;
+            let default_platform = default_triple();
 
-            let default_triple = default_triple();
-
-            eprintln!("--- Building dynamic libs ---");
+            eprintln!("--- Building dynamic libs & .NET bindings ---");
             let mut target: HashSet<String> = HashSet::from_iter(target);
-            target.insert(default_triple.clone());
+            target.insert(default_platform.triple.clone());
 
             for triple in target {
                 eprintln!("Building {triple}");
-                let platform = lookup_tuple(&triple);
+                let platform = lookup_triple(triple);
 
                 let mut cmd = cargo();
-                cmd.args(["build", "-p", "camrete-ffi", "--target", &triple]);
+                cmd.args(["build", "-p", "camrete-ffi", "--target", &platform.triple]);
                 if release {
                     cmd.arg("--release");
                 }
@@ -72,7 +65,7 @@ fn main() -> Result<()> {
                     exit(1);
                 }
 
-                let dll_name = format!("{}camrete{}", platform.dll_prefix, platform.dll_suffix);
+                // Copy DLL to respective platform directory.
 
                 let rt_dir = PathBuf::from("dotnet/Core/runtimes")
                     .join(platform.rid)
@@ -80,20 +73,32 @@ fn main() -> Result<()> {
 
                 fs::create_dir_all(&rt_dir)?;
 
-                let dll_path = PathBuf::from("target")
-                    .join(&triple)
-                    .join(if release { "release" } else { "debug" })
-                    .join(&dll_name);
+                let dll_name = platform.dll("camrete");
+                let dll_path = platform.target_dir(release).join(&dll_name);
 
                 fs::copy(&dll_path, rt_dir.join(&dll_name))?;
 
-                // Dotnet's platform-aware assembly resolution doesn't work for ProjectReferences.
-                // As a work around, copy the native dylib into a separate location where it can be easily
-                // consumed.
-                if triple == default_triple {
+                if platform.triple == default_platform.triple {
+                    // Dotnet's platform-aware assembly resolution doesn't work for ProjectReferences.
+                    // As a work around, ALSO copy the native dylib into a separate location where it
+                    // can be easily consumed.
                     let native_dir = PathBuf::from("dotnet/Core/runtimes/native");
                     fs::create_dir_all(&native_dir)?;
                     fs::copy(dll_path, native_dir.join(&dll_name))?;
+
+                    // Generate .NET bindings via DLL metadata
+                    eprintln!("Generating .NET source code");
+
+                    args.extend([
+                        "--out-dir=dotnet/Core".into(),
+                        "--config=uniffi.toml".into(),
+                        "--library".into(),
+                        default_platform
+                            .target_dir(release)
+                            .join(default_platform.dll("camrete"))
+                            .into_os_string(),
+                    ]);
+                    launch_bin("gen-dotnet", &args)?;
                 }
             }
         }
@@ -120,14 +125,8 @@ fn cargo() -> process::Command {
     process::Command::new(cargo)
 }
 
-struct TripleDetails {
-    rid: &'static str,
-    dll_prefix: &'static str,
-    dll_suffix: &'static str,
-}
-
-fn lookup_tuple(target: &str) -> TripleDetails {
-    let parts = target.split("-").collect::<Vec<_>>();
+fn lookup_triple(triple: String) -> TripleDetails {
+    let parts = triple.split("-").collect::<Vec<_>>();
     let rid = match *parts.as_slice() {
         ["aarch64", "apple", "darwin"] => "osx-arm64",
         ["x86_64", "apple", "darwin"] => "osx-x64",
@@ -141,7 +140,7 @@ fn lookup_tuple(target: &str) -> TripleDetails {
         ["aarch64", "unknown", "linux", "musl"] => "linux-musl-arm64",
         ["armv7", "unknown", "linux", "gnueabihf"] => "linux-arm",
 
-        _ => panic!("no dotnet RID not known for {target:?}"),
+        _ => panic!("no dotnet RID not known for {triple:?}"),
     };
 
     let (dll_prefix, dll_suffix) = match parts[2] {
@@ -151,13 +150,38 @@ fn lookup_tuple(target: &str) -> TripleDetails {
         _ => unreachable!(),
     };
 
-    TripleDetails { rid, dll_prefix, dll_suffix }
+    TripleDetails {
+        triple,
+        rid,
+        dll_prefix,
+        dll_suffix,
+    }
 }
 
-fn default_triple() -> String {
+fn default_triple() -> TripleDetails {
     let mut rustc = process::Command::new("rustc");
     rustc.args(["--print", "host-tuple"]);
     let out = rustc.output().unwrap();
     let triple = String::from_utf8(out.stdout).unwrap();
-    triple.trim().to_string()
+    lookup_triple(triple.trim().to_string())
+}
+
+#[derive(Debug, Clone)]
+struct TripleDetails {
+    triple: String,
+    rid: &'static str,
+    dll_prefix: &'static str,
+    dll_suffix: &'static str,
+}
+
+impl TripleDetails {
+    fn dll(&self, base: &str) -> String {
+        format!("{}{base}{}", self.dll_prefix, self.dll_suffix)
+    }
+
+    fn target_dir(&self, release: bool) -> PathBuf {
+        PathBuf::from("target")
+            .join(&self.triple)
+            .join(if release { "release" } else { "debug" })
+    }
 }

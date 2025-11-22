@@ -6,6 +6,6 @@ public static class CamreteCore
 {
     public static ulong Add(ulong left, ulong right)
     {
-        return CamreteCoreMethods.Add(left, right);
+        return CamreteMethods.Add(left, right);
     }
 }
