@@ -134,86 +134,30 @@ impl<'a, R: AsyncBufRead + Unpin + Send + 'a> RepoAssetLoader<'a> for TarGzAsset
     }
 }
 
-/// Loaders primarily useful for benchmarking.
-#[cfg(feature = "bench")]
-pub mod bench {
-    use std::sync::Arc;
+/// An asset loader which holds all future assets in-memory and performs no
+/// I/O.
+#[derive(Debug, Clone)]
+pub struct InMemoryAssetLoader {
+    pub assets: Vec<RepoAssetBuf>,
+}
 
-    use async_walkdir::WalkDir;
-    use tokio::fs::read;
-
-    use super::*;
-
-    /// Reads a directory containing assets from the file system.
-    pub struct AssetDirLoader {
-        path: PathBuf,
-        reader: WalkDir,
+impl From<Vec<RepoAssetBuf>> for InMemoryAssetLoader {
+    fn from(assets: Vec<RepoAssetBuf>) -> Self {
+        Self { assets }
     }
+}
 
-    impl AssetDirLoader {
-        pub fn new(path: PathBuf) -> Self {
-            Self {
-                reader: WalkDir::new(&path),
-                path,
-            }
-        }
+impl InMemoryAssetLoader {
+    pub async fn from_loader<'a>(other: impl RepoAssetLoader<'a>) -> Result<Self> {
+        let assets = other.asset_stream()?.try_collect().await?;
+        Ok(Self { assets })
     }
+}
 
-    impl<'a> RepoAssetLoader<'a> for AssetDirLoader {
-        fn asset_stream(self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>> {
-            let read_stream = self.reader;
-            let base_path = Arc::new(self.path);
-
-            let assets = read_stream
-                .map_err(|err| Error::from(err.into_io().unwrap()))
-                .try_filter_map(move |item| {
-                    let base_path = base_path.clone();
-                    async move {
-                        let path = item.path();
-                        let Some(variant) = RepoAssetVariant::from_path(&path) else {
-                            return Ok(None);
-                        };
-
-                        let asset = RepoAssetBuf {
-                            variant,
-                            data: read(&path).await?.into(),
-                            path: path.strip_prefix(&*base_path).unwrap().to_owned(),
-                        };
-
-                        Ok(Some(asset))
-                    }
-                })
-                .boxed();
-
-            Ok(assets)
-        }
-    }
-
-    /// An asset loader which holds all future assets in-memory and performs no
-    /// I/O.
-    #[derive(Debug, Clone)]
-    pub struct InMemoryAssetLoader {
-        pub assets: Vec<RepoAssetBuf>,
-    }
-
-    impl From<Vec<RepoAssetBuf>> for InMemoryAssetLoader {
-        fn from(assets: Vec<RepoAssetBuf>) -> Self {
-            Self { assets }
-        }
-    }
-
-    impl InMemoryAssetLoader {
-        pub async fn from_loader<'a>(other: impl RepoAssetLoader<'a>) -> Result<Self> {
-            let assets = other.asset_stream()?.try_collect().await?;
-            Ok(Self { assets })
-        }
-    }
-
-    impl<'a> RepoAssetLoader<'a> for InMemoryAssetLoader {
-        fn asset_stream(self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>> {
-            let stream = self.assets.into_iter().map(Ok);
-            Ok(futures_util::stream::iter(stream).boxed())
-        }
+impl<'a> RepoAssetLoader<'a> for InMemoryAssetLoader {
+    fn asset_stream(self) -> Result<BoxStream<'a, Result<RepoAssetBuf>>> {
+        let stream = self.assets.into_iter().map(Ok);
+        Ok(futures_util::stream::iter(stream).boxed())
     }
 }
 
@@ -228,10 +172,22 @@ pub(crate) mod test {
         let p3 = PathBuf::from("builds.json");
         let p4 = PathBuf::from("/absolute/path/to/download_counts.json");
 
-        assert_eq!(RepoAssetVariant::from_path(&p1).unwrap(), RepoAssetVariant::Release);
-        assert_eq!(RepoAssetVariant::from_path(&p2).unwrap(), RepoAssetVariant::RepositoryRefList);
-        assert_eq!(RepoAssetVariant::from_path(&p3).unwrap(), RepoAssetVariant::Builds);
-        assert_eq!(RepoAssetVariant::from_path(&p4).unwrap(), RepoAssetVariant::DownloadCounts);
+        assert_eq!(
+            RepoAssetVariant::from_path(&p1).unwrap(),
+            RepoAssetVariant::Release
+        );
+        assert_eq!(
+            RepoAssetVariant::from_path(&p2).unwrap(),
+            RepoAssetVariant::RepositoryRefList
+        );
+        assert_eq!(
+            RepoAssetVariant::from_path(&p3).unwrap(),
+            RepoAssetVariant::Builds
+        );
+        assert_eq!(
+            RepoAssetVariant::from_path(&p4).unwrap(),
+            RepoAssetVariant::DownloadCounts
+        );
     }
 
     #[test]

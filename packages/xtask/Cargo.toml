@@ -1,0 +1,18 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.53", features = ["derive"] }
+fs-err = "3.2.0"
+
+[dependencies.uniffi-bindgen-cs]
+git = "https://github.com/NordSecurity/uniffi-bindgen-cs"
+version = "0.10.0"
+optional = true
+
+[features]
+default = ["build-dotnet"]
+build-dotnet = ["dep:uniffi-bindgen-cs"]

@@ -1,0 +1,15 @@
+[package]
+name = "camrete-ffi"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+name = "camrete" # This is our crate name in this tutorial
+
+[dependencies]
+camrete-core = { version = "0.1.0", path = "../core" }
+uniffi = { version = "0.29" }
+
+[build-dependencies]
+uniffi = { version = "0.29", features = ["build"] }

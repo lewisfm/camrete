@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Camrete.Core</PackageId>
+    <Version>0.1.0-alpha</Version>
+    <Authors>Lewis McClelland</Authors>
+    <Product>Camrete</Product>
+
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Pack native libs for all platforms.
+      Dotnet unfortunately can't resolve these when consuming by project reference,
+      so this only works when consuming as a package.
+    -->
+    <None Include="runtimes/**"
+      Exclude="runtimes/native/**"
+      CopyToOutputDirectory="PreserveNewest"
+      Pack="true"
+      PackagePath="runtimes/" />
+    <!--
+      For local usage where is would be inconvenient to consume a package,
+      the native lib is directly copied to the output directory.
+    -->
+    <None Include="runtimes/native/**"
+      CopyToOutputDirectory="PreserveNewest"
+      Pack="false"
+      Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <Target Name="CopyLocalNativeLibraries" AfterTargets="Build">
+    <Copy
+      SourceFiles="@(LocalNativeLib)"
+      DestinationFolder="$(OutDir)"
+      SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

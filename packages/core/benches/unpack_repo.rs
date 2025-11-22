@@ -7,8 +7,7 @@ use std::{
 use camrete_core::{
     database::models::RepositoryRef,
     repo::{
-        RepoManager, TarGzAssetLoader,
-        asset_stream::bench::{InMemoryAssetLoader},
+        RepoManager, TarGzAssetLoader, asset_stream::InMemoryAssetLoader,
         client::DownloadProgressReporter,
     },
 };

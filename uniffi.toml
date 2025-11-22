@@ -1,0 +1,3 @@
+[bindings.csharp]
+cdylib_name = "camrete"
+namespace = "Camrete.Core"

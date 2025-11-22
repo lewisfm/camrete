@@ -4,8 +4,5 @@
         "port": 65254,
         "token": "secret"
     },
-    "lldb.launch.sourceLanguages": ["rust"],
-    "rust-analyzer.cargo.features": [
-        "camrete-core/bench"
-    ]
+    "lldb.launch.sourceLanguages": ["rust"]
 }
