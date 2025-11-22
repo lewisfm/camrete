@@ -9,6 +9,7 @@ name = "camrete" # This is our crate name in this tutorial
 
 [dependencies]
 camrete-core = { version = "0.1.0", path = "../core" }
+parking_lot = "0.12.5"
 uniffi = "0.29"
 
 # [build-dependencies]

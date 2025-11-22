@@ -1,7 +1,11 @@
 using Camrete.Core;
 
-// See https://aka.ms/new-console-template for more information
 Console.WriteLine("Hello, World!");
 
-ulong result = CamreteCore.Add(1, 2);
-Console.WriteLine(result);
+var manager = new RepoManager("../../development.db");
+var repoDB = manager.Database();
+
+foreach (var name in repoDB.AllRepos(createDefault: true))
+{
+    Console.WriteLine($"Repo name: {name}");
+}
