@@ -2,6 +2,18 @@
 
 A subset of CKAN, the Kerbal Space Program mod manager, which uses a relational database to improve speed.
 
+## Features
+
+Camrete is only a re-implementation of CKAN's repository data model, so it doesn't know how to work with game instances or anything. Currently you can use the `camrete update` command to download CKAN's online mod repository, and `camrete show` to view info about a mod.
+
+Project goals:
+
+- Create a C# package for querying CKAN repositories.
+- Use a relational database to create a faster implementation of a subset of CKAN Core.
+  - As it stands, the `update` command is a similar speed to CKAN's implementation.
+  - Currently, the `camrete show` command seems to be over 100x faster than `ckan show`.
+- (Maybe) Look into creating packages for other languages, like Swift, to make it easier to create a GUI for CKAN.
+
 ## Setup
 
 You need [`rustup`](https://rustup.rs) installed to build Camrete.
@@ -16,7 +28,7 @@ cargo install --path packages/cli
 
 Camrete itself is a Rust project, but it has bindings to C#. The package containing the bindings, as well as a sample application written in C#, are located in the `dotnet` directory.
 
-Currently, the .NET bindings are automatically generated from the code in `packages/ffi`. They aren't checked into Git, so you have to run this command to generate them:
+Currently, the .NET bindings are automatically generated from the code in `packages/ffi`. The generated code isn't checked into Git, so you have to run this command to generate it:
 
 ```terminal
 cargo xtask gen-dotnet
@@ -53,3 +65,9 @@ These targets can be compiled to from the a computer running the same OS, for li
 - `aarch64-pc-windows-msvc` (arm64 Windows)
 - `aarch64-apple-darwin` (arm64 macOS)
 - `x86_64-apple-darwin` (x86_64 macOS)
+
+## Testing
+
+Run unit tests using `cargo test`.
+
+Run benchmarks with `cargo bench --bench <bench_name>`.
