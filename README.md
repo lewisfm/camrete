@@ -56,13 +56,7 @@ Since Camrete compiles to native code, it needs a separate build for each platfo
 
 To cross compile Camrete to a different OS, you need to install [`cross`](https://github.com/cross-rs/cross) and Docker.
 
-When using Cross, you can build it just like normal, except replacing the command name:
-
-```shell
-cross build -p camrete-ffi --target x86_64-unknown-linux-gnu
-```
-
-Alternatively, you can use xtask for this, which might be more useful because it also copies the cross-compiled  DLLs into the .NET package (xtask will still do everything it normally does, like generating bindings). You can specify one or more multiple extra build targets by specifying the `-t` flag:
+Use xtask to generate the bindings like usual - it will automatically switch to `cross` if it thinks you're cross-compiling something. After it's done, it'll copy all the DLLs for the different platforms into the .NET package. Use it by specifying one or more multiple additional build targets via the `-t` flag:
 
 ```shell
 cargo xtask create-bindings -t x86_64-unknown-linux-gnu -t aarch64-unknown-linux-gnu
@@ -74,7 +68,7 @@ Here are the targets that work best with cross-compiling from any platform:
 - `aarch64-unknown-linux-gnu` (arm64 Linux)
 - `x86_64-pc-windows-gnu` (x64 Windows, no MSVC)
 
-These targets can be compiled to from the a computer running the same OS, for licensing reasons:
+The following targets can only be used from a computer running the same OS, for SDK licensing reasons:
 
 - `aarch64-pc-windows-msvc` (arm64 Windows)
 - `aarch64-apple-darwin` (arm64 macOS)
