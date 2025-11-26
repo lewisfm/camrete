@@ -42,7 +42,7 @@ dotnet publish
 
 Camrete itself is a Rust project, but it has bindings to C#. The package containing the bindings, as well as a sample application written in C#, are located in the `dotnet` directory.
 
-Currently, the .NET bindings are automatically generated from the code in `packages/ffi`. The generated code isn't checked into Git, so you have to run this command to generate it:
+Currently, the .NET bindings are automatically generated from the code in `camrete_core`. The generated code isn't checked into Git, so you have to run this command to generate it:
 
 ```shell
 cargo xtask create-bindings
