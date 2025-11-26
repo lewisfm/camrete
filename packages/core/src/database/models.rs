@@ -11,7 +11,7 @@ pub mod repository;
 pub use module::{Module, ModuleRelease, NewModule, NewRelease, ReleaseMetadata};
 pub use repository::{Repository, RepositoryRef};
 
-#[derive(Debug, Queryable, Selectable, Insertable)]
+#[derive(Debug, Queryable, Selectable, Insertable, uniffi::Record)]
 #[diesel(table_name = builds)]
 #[diesel(check_for_backend(Sqlite))]
 pub struct BuildRecord {

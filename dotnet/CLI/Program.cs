@@ -1,11 +1,7 @@
 using Camrete.Core;
+using System.CommandLine;
 
-Console.WriteLine("Hello, World!");
+RootCommand rootCommand = new("Sample .NET app for Camrete");
+rootCommand.Subcommands.Add(new ShowModule());
 
-var manager = new RepoManager("../../development.db");
-var repoDB = manager.Database();
-
-foreach (var name in repoDB.AllRepos(createDefault: true))
-{
-    Console.WriteLine($"Repo name: {name}");
-}
+return rootCommand.Parse(args).Invoke();

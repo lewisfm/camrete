@@ -1,4 +1,10 @@
 [bindings.csharp]
-cdylib_name = "camrete"
+cdylib_name = "camrete_core"
 namespace = "Camrete.Core"
 access_modifier = "public"
+
+[bindings.csharp.custom_types.Url]
+imports = ["System"]
+type_name = "Uri"
+into_custom = "new Uri({})"
+from_custom = "{}.AbsoluteUri"

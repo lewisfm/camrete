@@ -16,6 +16,11 @@ pub struct ModuleVersion<'a> {
     string: Cow<'a, str>,
 }
 
+type MVStatic = ModuleVersion<'static>;
+uniffi::custom_type!(MVStatic, String, {
+    lower: |v| v.to_string(),
+});
+
 impl<'a> ModuleVersion<'a> {
     pub fn epoch(&self) -> Option<u32> {
         self.epoch

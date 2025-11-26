@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{sync::LazyLock, time::SystemTime};
 
 use diesel::{
     prelude::*,
@@ -8,10 +8,13 @@ use directories::ProjectDirs;
 use miette::Diagnostic;
 use repo::client::RepoUnpackError;
 use thiserror::Error;
+use time::OffsetDateTime;
+use url::Url;
 
 use crate::json::JsonError;
 
 pub mod database;
+mod ffi;
 mod io;
 pub mod json;
 pub mod repo;
@@ -32,7 +35,8 @@ static USER_AGENT: &str = concat!(
     " <https://github.com/lewisfm/camrete>"
 );
 
-#[derive(Debug, Error, Diagnostic)]
+#[derive(Debug, Error, Diagnostic, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum Error {
     #[error("failed to open the on-device CKAN database")]
     #[diagnostic(code(camrete::database::cannot_open))]
@@ -80,3 +84,13 @@ impl From<serde_json::Error> for Error {
         JsonError::Parse(value).into()
     }
 }
+
+uniffi::custom_type!(Url, String, {
+    remote,
+    lower: |s| s.to_string(),
+    try_lift: |s| Ok(Url::parse(&s)?),
+});
+
+uniffi::custom_type!(OffsetDateTime, SystemTime, { remote });
+
+uniffi::setup_scaffolding!();

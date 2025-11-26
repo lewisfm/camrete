@@ -18,10 +18,24 @@ Project goals:
 
 You need [`rustup`](https://rustup.rs) installed to build Camrete.
 
-Run this command to install its command-line tool:
+Run this command to install Camrete's sample command-line app:
 
-```terminal
+```shell
 cargo install --path packages/cli
+
+# Use it:
+camrete show ROSolar
+```
+
+Run these commands to build the version of the command-line app written in .NET:
+
+```shell
+cd dotnet/CLI
+cargo xtask create-bindings
+dotnet publish
+
+# Use it:
+./bin/Release/net8.0/publish/Camrete.CLI show ROSolar
 ```
 
 ## .NET bindings
@@ -30,8 +44,8 @@ Camrete itself is a Rust project, but it has bindings to C#. The package contain
 
 Currently, the .NET bindings are automatically generated from the code in `packages/ffi`. The generated code isn't checked into Git, so you have to run this command to generate it:
 
-```terminal
-cargo xtask gen-dotnet
+```shell
+cargo xtask create-bindings
 ```
 
 This will populate the `Camrete.Core` package as well as generate the DLLs it needs to run.
@@ -44,14 +58,14 @@ To cross compile Camrete to a different OS, you need to install [`cross`](https:
 
 When using Cross, you can build it just like normal, except replacing the command name:
 
-```terminal
+```shell
 cross build -p camrete-ffi --target x86_64-unknown-linux-gnu
 ```
 
 Alternatively, you can use xtask for this, which might be more useful because it also copies the cross-compiled  DLLs into the .NET package (xtask will still do everything it normally does, like generating bindings). You can specify one or more multiple extra build targets by specifying the `-t` flag:
 
-```terminal
-cargo xtask gen-dotnet -t x86_64-unknown-linux-gnu -t aarch64-unknown-linux-gnu
+```shell
+cargo xtask create-bindings -t x86_64-unknown-linux-gnu -t aarch64-unknown-linux-gnu
 ```
 
 Here are the targets that work best with cross-compiling from any platform:

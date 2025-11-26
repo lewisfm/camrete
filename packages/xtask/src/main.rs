@@ -19,7 +19,7 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     #[clap(disable_help_flag = true, disable_help_subcommand = true)]
-    GenDotnet {
+    CreateBindings {
         #[clap(long, short)]
         target: Vec<String>,
         #[clap(long, short)]
@@ -39,7 +39,7 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
     match args.command {
-        Command::GenDotnet {
+        Command::CreateBindings {
             target,
             mut args,
             release,
@@ -64,7 +64,7 @@ fn main() -> Result<()> {
                 } else {
                     cargo()
                 };
-                cmd.args(["build", "-p", "camrete-ffi", "--target", &platform.triple]);
+                cmd.args(["build", "-p", "camrete-core", "--target", &platform.triple]);
                 if release {
                     cmd.arg("--release");
                 }
@@ -82,7 +82,7 @@ fn main() -> Result<()> {
 
                 fs::create_dir_all(&rt_dir)?;
 
-                let dll_name = platform.dll("camrete");
+                let dll_name = platform.dll("camrete_core");
                 let dll_path = platform.target_dir(release).join(&dll_name);
 
                 fs::copy(&dll_path, rt_dir.join(&dll_name))?;
@@ -104,10 +104,10 @@ fn main() -> Result<()> {
                         "--library".into(),
                         native_platform
                             .target_dir(release)
-                            .join(native_platform.dll("camrete"))
+                            .join(&dll_name)
                             .into_os_string(),
                     ]);
-                    launch_bin("gen-dotnet", &args)?;
+                    launch_bin("bindgen-dotnet", &args)?;
                 }
             }
         }

@@ -272,6 +272,7 @@ dependencies = [
  "astral-tokio-tar",
  "async-compression",
  "bytes",
+ "concat-idents",
  "criterion",
  "derive_more",
  "diesel",
@@ -280,6 +281,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "miette",
+ "parking_lot",
  "percent-encoding",
  "pin-project",
  "rand",
@@ -293,17 +295,8 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "url",
-]
-
-[[package]]
-name = "camrete-ffi"
-version = "0.1.0"
-dependencies = [
- "camrete-core",
- "libsqlite3-sys",
- "parking_lot",
  "uniffi",
+ "url",
 ]
 
 [[package]]
@@ -484,6 +477,16 @@ name = "compression-core"
 version = "0.4.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a9b614a5787ef0c8802a55766480563cb3a93b435898c422ed2a359cf811582"
+
+[[package]]
+name = "concat-idents"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f76990911f2267d837d9d0ad060aa63aaad170af40904b29461734c339030d4d"
+dependencies = [
+ "quote",
+ "syn 2.0.101",
+]
 
 [[package]]
 name = "console"
@@ -1461,7 +1464,6 @@ version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "947e6816f7825b2b45027c2c32e7085da9934defa535de4a6a46b10a4d5257fa"
 dependencies = [
- "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -1870,7 +1872,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "thiserror",
  "tokio",
  "tracing",
@@ -1907,9 +1909,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

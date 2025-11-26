@@ -25,6 +25,8 @@ use crate::repo::game::GameVersion;
 #[derive(Debug, Copy, Clone, Deref, From, Into, PartialEq, Eq, Default)]
 pub struct MetaGameVersion(pub GameVersion);
 
+uniffi::custom_newtype!(MetaGameVersion, GameVersion);
+
 impl Serialize for MetaGameVersion {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

@@ -11,7 +11,7 @@ use serde::{
 };
 
 /// The version of a CKAN metadata file.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, uniffi::Record)]
 pub struct SpecVersion {
     pub major: u16,
     pub minor: u16,

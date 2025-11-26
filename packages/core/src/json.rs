@@ -43,7 +43,7 @@ pub enum JsonError {
 }
 
 /// A full complete release of a module, suitable for encoding into JSON.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, uniffi::Record)]
 pub struct JsonModule {
     pub spec_version: SpecVersion,
     pub name: String,
@@ -162,7 +162,7 @@ impl JsonModule {
     }
 }
 
-#[derive(Debug, Deserialize, Default, TryFrom, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Deserialize, Default, TryFrom, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, uniffi::Enum)]
 #[serde(rename_all = "lowercase")]
 #[try_from(repr)]
 #[repr(i32)]
@@ -179,7 +179,7 @@ impl From<ModuleKind> for i32 {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, uniffi::Record)]
 pub struct ModuleResources {
     pub homepage: Option<String>,
     pub spacedock: Option<String>,
@@ -190,7 +190,7 @@ pub struct ModuleResources {
     pub x_screenshot: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, uniffi::Record)]
 pub struct MetaRelationship {
     #[serde(flatten)]
     pub descriptor: RelationshipDescriptor,
@@ -200,7 +200,7 @@ pub struct MetaRelationship {
     pub suppress_recommendations: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, uniffi::Enum)]
 #[serde(untagged)]
 pub enum RelationshipDescriptor {
     Direct(DirectRelationshipDescriptor),
@@ -226,7 +226,7 @@ impl RelationshipDescriptor {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, uniffi::Record)]
 pub struct DirectRelationshipDescriptor {
     pub name: String,
     #[serde(default)]
@@ -237,12 +237,12 @@ pub struct DirectRelationshipDescriptor {
     pub version: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, uniffi::Record)]
 pub struct AnyOfRelationshipDescriptor {
     pub any_of: Vec<MetaRelationship>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, uniffi::Record)]
 pub struct DownloadChecksum {
     #[serde(default)]
     pub sha1: Option<String>,
@@ -250,7 +250,7 @@ pub struct DownloadChecksum {
     pub sha256: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, uniffi::Record)]
 pub struct ModuleInstallDescriptor {
     #[serde(flatten)]
     pub source: ModuleInstallSourceDirective,
@@ -273,7 +273,7 @@ pub struct ModuleInstallDescriptor {
     pub include_only_regexp: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, uniffi::Enum)]
 #[serde(rename_all = "snake_case")]
 pub enum ModuleInstallSourceDirective {
     File(String),
@@ -283,6 +283,7 @@ pub enum ModuleInstallSourceDirective {
 
 #[derive(
     Debug, Serialize, Deserialize, Default, TryFrom, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
+    uniffi::Enum
 )]
 #[serde(rename_all = "snake_case")]
 #[try_from(repr)]

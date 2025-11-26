@@ -80,11 +80,26 @@ where
 }
 
 mod id {
+    use super::Id;
+
     macro_rules! tag {
         ($($name:ident),*$(,)?) => {
             $(
-            #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-            pub struct $name;
+            #[allow(non_snake_case)]
+            mod $name {
+                use super::*;
+
+                concat_idents::concat_idents!(tag_name = $name, Tag {
+                    #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+                    pub struct tag_name;
+                    type ThisTag = tag_name;
+                });
+
+                concat_idents::concat_idents!(id_name = $name, Id {
+                    pub type id_name = Id<ThisTag>;
+                });
+            }
+            pub use $name::*;
             )*
         };
     }
@@ -93,24 +108,25 @@ mod id {
         Repo,
         Module,
         Release,
-        RelationshipGroup,
-        Relationship,
+        DepGroup,
+        Dep,
         ModAuthor,
         ModLicense,
         ModLocale,
         ModTag,
     );
 }
+pub use id::*;
 
-pub type RepoId = Id<id::Repo>;
-pub type ModuleId = Id<id::Module>;
-pub type ReleaseId = Id<id::Release>;
-pub type DepGroupId = Id<id::RelationshipGroup>;
-pub type DepId = Id<id::Relationship>;
-pub type ModAuthorId = Id<id::ModAuthor>;
-pub type ModLicenseId = Id<id::ModLicense>;
-pub type ModLocaleId = Id<id::ModLocale>;
-pub type ModTagId = Id<id::ModTag>;
+uniffi::custom_type!(RepoId, i32);
+uniffi::custom_type!(ModuleId, i32);
+uniffi::custom_type!(ReleaseId, i32);
+uniffi::custom_type!(DepGroupId, i32);
+uniffi::custom_type!(DepId, i32);
+uniffi::custom_type!(ModAuthorId, i32);
+uniffi::custom_type!(ModLicenseId, i32);
+uniffi::custom_type!(ModLocaleId, i32);
+uniffi::custom_type!(ModTagId, i32);
 
 #[derive(Debug, FromSqlRow, AsExpression)]
 #[diesel(sql_type = Binary)]

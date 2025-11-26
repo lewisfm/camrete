@@ -12,7 +12,7 @@ use crate::database::{JsonbValue, RepoId, schema::*};
 
 type All = Select<repositories::table, AsSelect<Repository, Sqlite>>;
 
-#[derive(Debug, Queryable, Selectable, Identifiable)]
+#[derive(Debug, Queryable, Selectable, Identifiable, uniffi::Record)]
 #[diesel(table_name = repositories)]
 #[diesel(primary_key(repo_id))]
 #[diesel(check_for_backend(Sqlite))]

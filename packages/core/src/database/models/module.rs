@@ -16,7 +16,10 @@ use time::OffsetDateTime;
 use url::Url;
 
 use crate::{
-    database::{DepGroupId, DepId, JsonbValue, ModAuthorId, ModuleId, ReleaseId, RepoId, models::Repository, schema::*},
+    database::{
+        DepGroupId, DepId, JsonbValue, ModAuthorId, ModuleId, ReleaseId, RepoId,
+        models::Repository, schema::*,
+    },
     json::{DownloadChecksum, ModuleInstallDescriptor, ModuleKind, ModuleResources, ReleaseStatus},
     repo::game::GameVersion,
 };
@@ -30,8 +33,9 @@ pub type AllReleases = Select<module_releases::table, AsSelect<ModuleRelease, Sq
 type AllDepGroups =
     Select<module_relationship_groups::table, AsSelect<ModuleRelationshipGroup, Sqlite>>;
 type AllDeps = Select<module_relationships::table, AsSelect<ModuleRelationship, Sqlite>>;
+type Sel<T> = AsSelect<T, Sqlite>;
 
-#[derive(Debug, Queryable, Selectable, Identifiable, Associations)]
+#[derive(Debug, Queryable, Selectable, Identifiable, Associations, uniffi::Record)]
 #[diesel(table_name = modules)]
 #[diesel(primary_key(module_id))]
 #[diesel(belongs_to(Repository, foreign_key = repo_id))]
@@ -95,7 +99,7 @@ pub struct NewRelease<'a> {
     pub release_date: Option<OffsetDateTime>,
 }
 
-#[derive(Debug, Queryable, Selectable, Identifiable, Associations)]
+#[derive(Debug, Queryable, Selectable, Identifiable, Associations, uniffi::Record)]
 #[diesel(table_name = module_releases)]
 #[diesel(primary_key(release_id))]
 #[diesel(belongs_to(Module))]
@@ -159,6 +163,26 @@ impl ModuleRelease {
             .select(module_licenses::license)
             .filter(module_licenses::release_id.eq(release))
     }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn locales_for(release: ReleaseId) -> _ {
+        module_localizations::table
+            .select(module_localizations::locale)
+            .filter(module_localizations::release_id.eq(release))
+    }
+
+    #[dsl::auto_type(no_type_alias)]
+    pub fn relationships_for(release: ReleaseId) -> _ {
+        let outer: Sel<ModuleRelationshipGroup> = ModuleRelationshipGroup::as_select();
+        let inner: Sel<ModuleRelationship> = ModuleRelationship::as_select();
+
+        module_relationship_groups::table
+            .inner_join(module_relationships::table)
+            .filter(module_relationship_groups::release_id.eq(release))
+            .select((outer, inner))
+            .order(module_relationship_groups::rel_type)
+            .then_order_by(module_relationship_groups::ordinal)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -180,7 +204,7 @@ pub struct NewModuleAuthor<'a> {
     pub author: &'a str,
 }
 
-#[derive(Debug, Insertable, Identifiable, Associations)]
+#[derive(Debug, Insertable, Identifiable, Associations, uniffi::Record)]
 #[diesel(table_name = module_authors)]
 #[diesel(belongs_to(ModuleRelease, foreign_key = release_id))]
 #[diesel(check_for_backend(Sqlite))]
@@ -233,7 +257,7 @@ pub struct NewModuleRelationshipGroup<'a> {
     pub suppress_recommendations: bool,
 }
 
-#[derive(Debug, Queryable, Selectable, Identifiable, Associations)]
+#[derive(Debug, Queryable, Selectable, Identifiable, Associations, uniffi::Record)]
 #[diesel(table_name = module_relationship_groups)]
 #[diesel(primary_key(group_id))]
 #[diesel(belongs_to(ModuleRelease, foreign_key = release_id))]
@@ -261,7 +285,9 @@ impl ModuleRelationshipGroup {
     }
 }
 
-#[derive(Debug, AsExpression, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TryFrom)]
+#[derive(
+    Debug, AsExpression, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TryFrom, uniffi::Enum,
+)]
 #[diesel(sql_type = Integer)]
 #[try_from(repr)]
 #[repr(i32)]
@@ -309,7 +335,7 @@ pub struct NewModuleRelationship<'a> {
     pub target_version_min: Option<&'a str>,
 }
 
-#[derive(Debug, Queryable, Selectable, Identifiable, Associations)]
+#[derive(Debug, Queryable, Selectable, Identifiable, Associations, uniffi::Record)]
 #[diesel(table_name = module_relationships)]
 #[diesel(primary_key(relationship_id))]
 #[diesel(belongs_to(ModuleRelationshipGroup, foreign_key = group_id))]
@@ -345,4 +371,43 @@ pub struct NewModuleReplacement<'a> {
     pub target_name: &'a str,
     pub target_version: Option<&'a str>,
     pub target_version_min: Option<&'a str>,
+}
+
+type RMStatic = ReleaseMetadata<'static>;
+uniffi::custom_type!(RMStatic, ReleaseMetadataFFI);
+
+#[derive(uniffi::Record)]
+pub struct ReleaseMetadataFFI {
+    pub comment: Option<String>,
+    pub download: Vec<Url>,
+    pub download_hash: DownloadChecksum,
+    pub download_content_type: Option<String>,
+    pub resources: ModuleResources,
+    pub install: Vec<ModuleInstallDescriptor>,
+}
+
+impl From<ReleaseMetadata<'static>> for ReleaseMetadataFFI {
+    fn from(value: ReleaseMetadata) -> Self {
+        Self {
+            comment: value.comment.map(Cow::into_owned),
+            download: value.download.into_owned(),
+            download_hash: value.download_hash.into_owned(),
+            download_content_type: value.download_content_type.map(Cow::into_owned),
+            resources: value.resources.into_owned(),
+            install: value.install.into_owned(),
+        }
+    }
+}
+
+impl From<ReleaseMetadataFFI> for ReleaseMetadata<'static> {
+    fn from(value: ReleaseMetadataFFI) -> Self {
+        Self {
+            comment: value.comment.map(Cow::Owned),
+            download: Cow::Owned(value.download),
+            download_hash: Cow::Owned(value.download_hash),
+            download_content_type: value.download_content_type.map(Cow::Owned),
+            resources: Cow::Owned(value.resources),
+            install: Cow::Owned(value.install),
+        }
+    }
 }
