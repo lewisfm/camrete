@@ -9,7 +9,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [dependencies]
 astral-tokio-tar = "0.5.6"
 async-compression = { version = "0.4.33", features = ["tokio", "gzip"] }
-bytes = "1.11.0"
+bytes = "1.11.1"
 concat-idents = "1.1.5"
 derive_more = { version = "2.0.1", features = ["deref", "from", "into", "try_from"] }
 diesel = { version = "2.3.3", features = ["sqlite", "returning_clauses_for_sqlite_3_35", "r2d2", "serde_json", "time"] }
